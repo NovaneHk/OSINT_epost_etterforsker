@@ -10,6 +10,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/components/ui/use-toast';
+import { LoadingOverlay, StatsSkeleton, ButtonLoading, DataLoadingWrapper } from '@/components/ui/loading';
+import { useLoadingState } from '@/components/providers/loading-provider';
+import { PageErrorBoundary } from '@/components/providers/error-boundary';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -56,6 +59,7 @@ import type { Lead, FilterState, SortState, LeadsResponse, BatchUpdateLeadsReque
 export default function LeadsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { isLoading: pageLoading, startLoading: startPageLoading, stopLoading: stopPageLoading } = useLoadingState('leads-page');
 
   // State
   const [filters, setFilters] = useState<FilterState>({
@@ -236,7 +240,8 @@ export default function LeadsPage() {
   }, [filters]);
 
   return (
-    <div className="space-y-6">
+    <PageErrorBoundary>
+      <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -253,8 +258,10 @@ export default function LeadsPage() {
             onClick={() => refetch()}
             disabled={isLoading}
           >
-            <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-            Oppdater
+            <ButtonLoading isLoading={isLoading} loadingText="Oppdaterer...">
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Oppdater
+            </ButtonLoading>
           </Button>
 
           <Button
@@ -263,8 +270,10 @@ export default function LeadsPage() {
             onClick={handleStartRun}
             disabled={runMutation.isPending}
           >
-            <Play className="mr-2 h-4 w-4" />
-            Start kjøring
+            <ButtonLoading isLoading={runMutation.isPending} loadingText="Starter...">
+              <Play className="mr-2 h-4 w-4" />
+              Start kjøring
+            </ButtonLoading>
           </Button>
 
           <DropdownMenu>
@@ -299,59 +308,83 @@ export default function LeadsPage() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Totalt leads</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatNumber(stats.total)}</div>
-            <p className="text-xs text-muted-foreground">
-              {activeFiltersCount > 0 && `${activeFiltersCount} aktive filtre`}
-            </p>
-          </CardContent>
-        </Card>
+      <DataLoadingWrapper
+        data={leadsResponse}
+        isLoading={isLoading}
+        error={error}
+        loadingFallback={<StatsSkeleton />}
+        errorFallback={(error) => (
+          <Card className="border-red-200 bg-red-50">
+            <CardContent className="pt-6">
+              <p className="text-red-700">Failed to load stats: {error.message}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => refetch()}
+                className="mt-2"
+              >
+                Retry
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+      >
+        {() => (
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Totalt leads</CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{formatNumber(stats.total)}</div>
+                <p className="text-xs text-muted-foreground">
+                  {activeFiltersCount > 0 && `${activeFiltersCount} aktive filtre`}
+                </p>
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Høy score</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatNumber(stats.highScore)}</div>
-            <p className="text-xs text-muted-foreground">
-              Score ≥ 80
-            </p>
-          </CardContent>
-        </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Høy score</CardTitle>
+                <TrendingUp className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{formatNumber(stats.highScore)}</div>
+                <p className="text-xs text-muted-foreground">
+                  Score ≥ 80
+                </p>
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Taggede</CardTitle>
-            <FileText className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatNumber(stats.tagged)}</div>
-            <p className="text-xs text-muted-foreground">
-              Har tags
-            </p>
-          </CardContent>
-        </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Taggede</CardTitle>
+                <FileText className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{formatNumber(stats.tagged)}</div>
+                <p className="text-xs text-muted-foreground">
+                  Har tags
+                </p>
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Bedrifter</CardTitle>
-            <Mail className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatNumber(stats.companies)}</div>
-            <p className="text-xs text-muted-foreground">
-              Unike selskaper
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Bedrifter</CardTitle>
+                <Mail className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{formatNumber(stats.companies)}</div>
+                <p className="text-xs text-muted-foreground">
+                  Unike selskaper
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </DataLoadingWrapper>
 
       {/* Filters */}
       <Card>
@@ -370,21 +403,25 @@ export default function LeadsPage() {
       </Card>
 
       {/* Table */}
-      <Card>
-        <CardContent className="p-0">
-          <LeadTable
-            data={leadsData}
-            loading={isLoading}
-            totalCount={totalCount}
-            filters={filters}
-            onFiltersChange={handleFiltersChange}
-            onSortChange={handleSortChange}
-            onRowSelect={handleRowSelect}
-            onBulkAction={handleBulkAction}
-            onExport={handleExport}
-          />
-        </CardContent>
-      </Card>
+      <PageErrorBoundary>
+        <Card>
+          <CardContent className="p-0">
+            <LoadingOverlay isLoading={isLoading} loadingText="Loading leads...">
+              <LeadTable
+                data={leadsData}
+                loading={isLoading}
+                totalCount={totalCount}
+                filters={filters}
+                onFiltersChange={handleFiltersChange}
+                onSortChange={handleSortChange}
+                onRowSelect={handleRowSelect}
+                onBulkAction={handleBulkAction}
+                onExport={handleExport}
+              />
+            </LoadingOverlay>
+          </CardContent>
+        </Card>
+      </PageErrorBoundary>
 
       {/* Pagination */}
       {totalPages > 1 && (
@@ -542,6 +579,7 @@ export default function LeadsPage() {
           )}
         </SheetContent>
       </Sheet>
-    </div>
+      </div>
+    </PageErrorBoundary>
   );
 }

@@ -6,7 +6,8 @@ import { I18nProvider } from '@/components/providers/i18n-provider';
 import { QueryProvider } from '@/components/providers/query-provider';
 import { ToastProvider } from '@/components/providers/toast-provider';
 import { KeyboardShortcutsProvider } from '@/components/providers/keyboard-shortcuts-provider';
-import { ErrorProvider } from '@/components/providers/error-provider';
+import { ErrorProvider } from '@/components/providers/error-boundary';
+import { LoadingProvider } from '@/components/providers/loading-provider';
 import { SidebarNav } from '@/components/layout/sidebar-nav';
 import { TopNav } from '@/components/layout/top-nav';
 
@@ -73,8 +74,9 @@ export default function RootLayout({ children }: RootLayoutProps) {
             disableTransitionOnChange
           >
             <ErrorProvider>
-              <QueryProvider>
-                <KeyboardShortcutsProvider>
+              <LoadingProvider>
+                <QueryProvider>
+                  <KeyboardShortcutsProvider>
                   <div className="min-h-screen bg-background">
                     {/* Main Layout */}
                     <div className="flex h-screen">
@@ -99,9 +101,10 @@ export default function RootLayout({ children }: RootLayoutProps) {
                       </div>
                     </div>
                   </div>
-                  <ToastProvider />
-                </KeyboardShortcutsProvider>
-              </QueryProvider>
+                    <ToastProvider />
+                  </KeyboardShortcutsProvider>
+                </QueryProvider>
+              </LoadingProvider>
             </ErrorProvider>
           </ThemeProvider>
         </I18nProvider>
