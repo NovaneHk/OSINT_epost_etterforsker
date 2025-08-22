@@ -8,6 +8,13 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 import logging
 
 from backend.core.database import db_manager, create_tables
+from backend.core.exceptions import (
+    LeadNotFoundError, ValidationError, DatabaseError, to_http_exception
+)
+from backend.core.validators import (
+    validate_email_address, validate_phone_number, validate_url,
+    validate_confidence_score, validate_pagination_params, sanitize_string
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -79,6 +86,13 @@ async def get_leads(
     """Get leads with pagination and filtering"""
 
     try:
+        # Validate pagination parameters
+        skip, limit = validate_pagination_params(skip, limit)
+
+        # Sanitize search input
+        if search:
+            search = sanitize_string(search, 100)
+
         # Ensure database tables exist
         await create_tables()
 
@@ -88,7 +102,11 @@ async def get_leads(
         conditions = []
 
         if status:
-            conditions.append("status = ?")
+            # Validate status
+            valid_statuses = ['verified', 'pending', 'failed', 'bounced', 'unverified']
+            if status not in valid_statuses:
+                raise ValidationError(f"Invalid status. Must be one of: {', '.join(valid_statuses)}", "status")
+            conditions.append("verification_status = ?")
             params.append(status)
 
         if search:
@@ -108,9 +126,11 @@ async def get_leads(
         logger.info(f"Retrieved {len(results)} leads")
         return results
 
+    except (ValidationError, DatabaseError) as e:
+        raise to_http_exception(e)
     except Exception as e:
         logger.error(f"Error getting leads: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise DatabaseError(f"Failed to retrieve leads: {str(e)}", "select")
 
 
 @router.post("/", response_model=Dict[str, Any])
@@ -120,7 +140,28 @@ async def create_lead(lead_data: Dict[str, Any]):
     try:
         # Validate required fields
         if not lead_data.get("email"):
-            raise HTTPException(status_code=400, detail="Email is required")
+            raise ValidationError("Email is required", "email")
+
+        # Validate and normalize email
+        lead_data["email"] = validate_email_address(lead_data["email"])
+
+        # Validate optional fields
+        if lead_data.get("phone"):
+            lead_data["phone"] = validate_phone_number(lead_data["phone"])
+
+        if lead_data.get("linkedin_url"):
+            lead_data["linkedin_url"] = validate_url(lead_data["linkedin_url"])
+
+        if lead_data.get("website"):
+            lead_data["website"] = validate_url(lead_data["website"])
+
+        if lead_data.get("confidence_score") is not None:
+            lead_data["confidence_score"] = validate_confidence_score(lead_data["confidence_score"])
+
+        # Sanitize string fields
+        for field in ["name", "company", "job_title", "location", "industry"]:
+            if lead_data.get(field):
+                lead_data[field] = sanitize_string(lead_data[field])
 
         # Ensure database tables exist
         await create_tables()
@@ -154,9 +195,11 @@ async def create_lead(lead_data: Dict[str, Any]):
         logger.info(f"Created lead: {lead.email}")
         return result
 
+    except (ValidationError, DatabaseError) as e:
+        raise to_http_exception(e)
     except Exception as e:
         logger.error(f"Error creating lead: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise DatabaseError(f"Failed to create lead: {str(e)}", "insert")
 
 
 @router.get("/stats", response_model=Dict[str, Any])
@@ -215,19 +258,23 @@ async def get_lead(lead_id: int):
     """Get a specific lead by ID"""
 
     try:
+        # Validate lead_id
+        if lead_id <= 0:
+            raise ValidationError("Lead ID must be a positive integer", "lead_id")
+
         query = "SELECT * FROM leads WHERE id = ?"
         results = db_manager.execute_query(query, (lead_id,))
 
         if not results:
-            raise HTTPException(status_code=404, detail="Lead not found")
+            raise LeadNotFoundError(str(lead_id))
 
         return results[0]
 
-    except HTTPException:
-        raise
+    except (ValidationError, LeadNotFoundError) as e:
+        raise to_http_exception(e)
     except Exception as e:
         logger.error(f"Error getting lead {lead_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise DatabaseError(f"Failed to retrieve lead: {str(e)}", "select")
 
 
 @router.put("/{lead_id}", response_model=Dict[str, Any])

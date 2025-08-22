@@ -19,7 +19,7 @@ from backend.core.config import get_settings
 from backend.core.database import create_tables, close_db_connections
 from backend.core.logging import setup_logging
 from backend.api.routes import api_router
-from backend.middleware.error_handler import ErrorHandlerMiddleware
+from backend.core.error_handlers import setup_error_handlers
 from backend.middleware.rate_limiter import RateLimiterMiddleware
 from backend.middleware.request_logger import RequestLoggerMiddleware
 
@@ -92,9 +92,11 @@ def create_application() -> FastAPI:
     )
 
     # Custom middleware
-    app.add_middleware(ErrorHandlerMiddleware)
     app.add_middleware(RateLimiterMiddleware)
     app.add_middleware(RequestLoggerMiddleware)
+
+    # Setup error handlers
+    setup_error_handlers(app)
 
     # Include API routes
     app.include_router(api_router, prefix="/api")
@@ -121,18 +123,6 @@ def create_application() -> FastAPI:
             "health_check": "/health"
         }
 
-    # Global exception handler
-    @app.exception_handler(Exception)
-    async def global_exception_handler(request: Request, exc: Exception):
-        """Global exception handler for unhandled errors"""
-        logger.error(f"Unhandled error on {request.url}: {exc}", exc_info=True)
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "message": "Internal server error",
-                "detail": str(exc) if settings.DEBUG else "An unexpected error occurred"
-            }
-        )
 
     # Serve static files in development
     if settings.DEBUG and settings.STATIC_FILES_DIR:
