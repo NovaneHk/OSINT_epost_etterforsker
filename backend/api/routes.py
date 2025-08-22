@@ -11,6 +11,9 @@ from .leads import router as leads_router
 from .kpis import router as kpis_router
 from .sources import router as sources_router
 from .campaigns import router as campaigns_router
+from .exports import router as exports_router
+from .runs import router as runs_router
+from .settings import router as settings_router
 
 # Create main API router
 api_router = APIRouter()
@@ -52,6 +55,24 @@ api_router.include_router(
     tags=["Campaigns"]
 )
 
+api_router.include_router(
+    exports_router,
+    prefix="/exports",
+    tags=["Exports"]
+)
+
+api_router.include_router(
+    runs_router,
+    prefix="/runs",
+    tags=["Runs"]
+)
+
+api_router.include_router(
+    settings_router,
+    prefix="/settings",
+    tags=["Settings"]
+)
+
 # Health check for API
 @api_router.get("/", tags=["Root"])
 async def api_root():
@@ -65,7 +86,10 @@ async def api_root():
             "leads": "/api/leads",
             "kpis": "/api/kpis",
             "sources": "/api/sources",
-            "campaigns": "/api/campaigns"
+            "campaigns": "/api/campaigns",
+            "exports": "/api/exports",
+            "runs": "/api/runs",
+            "settings": "/api/settings"
         }
     }
 
@@ -81,6 +105,9 @@ async def get_api_version():
             "lead_processing",
             "source_management",
             "campaign_management",
+            "export_management",
+            "run_management",
+            "settings_management",
             "osint_crawler",
             "email_validation"
         ]
