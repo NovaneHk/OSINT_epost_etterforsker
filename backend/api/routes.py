@@ -10,6 +10,7 @@ from .users_simple import router as users_router
 from .leads import router as leads_router
 from .kpis import router as kpis_router
 from .sources import router as sources_router
+from .campaigns import router as campaigns_router
 
 # Create main API router
 api_router = APIRouter()
@@ -45,6 +46,12 @@ api_router.include_router(
     tags=["Sources"]
 )
 
+api_router.include_router(
+    campaigns_router,
+    prefix="/campaigns",
+    tags=["Campaigns"]
+)
+
 # Health check for API
 @api_router.get("/", tags=["Root"])
 async def api_root():
@@ -57,7 +64,8 @@ async def api_root():
             "users": "/api/users",
             "leads": "/api/leads",
             "kpis": "/api/kpis",
-            "sources": "/api/sources"
+            "sources": "/api/sources",
+            "campaigns": "/api/campaigns"
         }
     }
 
@@ -72,6 +80,7 @@ async def get_api_version():
             "user_management",
             "lead_processing",
             "source_management",
+            "campaign_management",
             "osint_crawler",
             "email_validation"
         ]
