@@ -1,720 +1,621 @@
-'use client';
+"use client"
 
-import React, { useState } from 'react';
-import { Plus, Search, Download, FileText, Clock, CheckCircle, AlertCircle, Trash2, Eye, Settings, Filter } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Progress } from '@/components/ui/progress';
-import { Checkbox } from '@/components/ui/checkbox';
-import { useExports, useCreateExport } from '@/hooks/use-api';
-import { useToast } from '@/components/ui/use-toast';
-import { formatRelativeTime, formatNumber, formatFileSize } from '@/lib/utils';
-import type { Export, CreateExportRequest } from '@/types/api';
+import { useState, useEffect } from 'react'
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Plus, Download, FileText, Database, Calendar, BarChart3, RefreshCw, Trash2 } from 'lucide-react'
+import { toast } from "sonner"
 
-interface ExportFormData {
-  name: string;
-  type: 'csv' | 'xlsx' | 'json';
-  filters: {
-    verification_status?: string[];
-    confidence_score_min?: number;
-    confidence_score_max?: number;
-    industries?: string[];
-    domains?: string[];
-    date_from?: string;
-    date_to?: string;
-    source_ids?: string[];
-    tags?: string[];
-  };
-  include_fields: string[];
+interface Export {
+  id: number
+  name: string
+  type: string
+  status: string
+  filters: string
+  file_path?: string
+  file_size?: number
+  leads_count?: number
+  progress: number
+  created_at: string
+  completed_at?: string
+  expires_at?: string
 }
 
-const EXPORT_TYPES = [
-  { value: 'csv', label: 'CSV', description: 'Kommaseparerte verdier for Excel/Google Sheets' },
-  { value: 'xlsx', label: 'Excel', description: 'Microsoft Excel-format (.xlsx)' },
-  { value: 'json', label: 'JSON', description: 'Strukturert data for API-integrasjon' },
-] as const;
-
-const AVAILABLE_FIELDS = [
-  { id: 'email', label: 'E-post', essential: true },
-  { id: 'name', label: 'Navn' },
-  { id: 'company', label: 'Bedrift' },
-  { id: 'domain', label: 'Domene' },
-  { id: 'job_title', label: 'Stillingstittel' },
-  { id: 'phone', label: 'Telefon' },
-  { id: 'linkedin_url', label: 'LinkedIn URL' },
-  { id: 'twitter_url', label: 'Twitter URL' },
-  { id: 'website', label: 'Nettside' },
-  { id: 'location', label: 'Lokasjon' },
-  { id: 'industry', label: 'Bransje' },
-  { id: 'company_size', label: 'Bedriftsstørrelse' },
-  { id: 'revenue', label: 'Omsetning' },
-  { id: 'technologies', label: 'Teknologier' },
-  { id: 'confidence_score', label: 'Konfidenspoeng' },
-  { id: 'verification_status', label: 'Verifikasjonsstatus' },
-  { id: 'engagement_score', label: 'Engasjementsscore' },
-  { id: 'last_contacted', label: 'Sist kontaktet' },
-  { id: 'source_id', label: 'Kilde-ID' },
-  { id: 'source_url', label: 'Kilde URL' },
-  { id: 'notes', label: 'Notater' },
-  { id: 'tags', label: 'Tags' },
-  { id: 'custom_fields', label: 'Egendefinerte felt' },
-  { id: 'created_at', label: 'Opprettet dato' },
-  { id: 'updated_at', label: 'Oppdatert dato' },
-];
-
-const VERIFICATION_STATUSES = [
-  { value: 'verified', label: 'Verifisert' },
-  { value: 'unverified', label: 'Ikke verifisert' },
-  { value: 'invalid', label: 'Ugyldig' },
-  { value: 'pending', label: 'Venter' },
-];
+interface ExportStats {
+  total_exports: number
+  pending_exports: number
+  completed_exports: number
+  failed_exports: number
+  recent_exports_7d: number
+  total_file_size_bytes: number
+  status_breakdown: Record<string, number>
+  type_breakdown: Record<string, number>
+}
 
 export default function ExportsPage() {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [typeFilter, setTypeFilter] = useState<string>('all');
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [selectedExport, setSelectedExport] = useState<Export | null>(null);
-  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
-  const [formData, setFormData] = useState<ExportFormData>({
+  const [exports, setExports] = useState<Export[]>([])
+  const [stats, setStats] = useState<ExportStats | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [showCreateForm, setShowCreateForm] = useState(false)
+  const [newExport, setNewExport] = useState({
     name: '',
     type: 'csv',
-    filters: {},
-    include_fields: ['email', 'name', 'company', 'job_title', 'confidence_score', 'verification_status'],
-  });
+    filters: '{}'
+  })
+  const [isCreating, setIsCreating] = useState(false)
 
-  const { toast } = useToast();
-  const { data: exportsResponse, isLoading, error } = useExports();
-  const createExportMutation = useCreateExport();
+  useEffect(() => {
+    fetchExports()
+    fetchStats()
+  }, [])
 
-  const exports = exportsResponse?.data || [];
-
-  // Filter exports
-  const filteredExports = exports.filter(exportItem => {
-    const matchesSearch = exportItem.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || exportItem.status === statusFilter;
-    const matchesType = typeFilter === 'all' || exportItem.type === typeFilter;
-
-    return matchesSearch && matchesStatus && matchesType;
-  });
-
-  const handleCreateExport = async () => {
+  const fetchExports = async () => {
     try {
-      await createExportMutation.mutateAsync({
-        name: formData.name,
-        type: formData.type,
-        filters: Object.keys(formData.filters).length > 0 ? formData.filters : undefined,
-        include_fields: formData.include_fields,
-      });
-      setIsCreateDialogOpen(false);
-      resetForm();
-      toast({
-        title: 'Export startet',
-        description: 'Eksporten behandles og vil være klar om litt.',
-      });
+      const response = await fetch('/api/exports')
+      if (response.ok) {
+        const data = await response.json()
+        setExports(data)
+      } else {
+        toast.error('Failed to fetch exports')
+      }
     } catch (error) {
-      toast({
-        title: 'Kunne ikke starte export',
-        description: 'En feil oppstod. Prøv igjen.',
-        variant: 'destructive',
-      });
+      console.error('Error fetching exports:', error)
+      toast.error('Error loading exports')
+    } finally {
+      setIsLoading(false)
     }
-  };
-
-  const resetForm = () => {
-    setFormData({
-      name: '',
-      type: 'csv',
-      filters: {},
-      include_fields: ['email', 'name', 'company', 'job_title', 'confidence_score', 'verification_status'],
-    });
-  };
-
-  const updateFilter = (key: string, value: any) => {
-    setFormData(prev => ({
-      ...prev,
-      filters: {
-        ...prev.filters,
-        [key]: value,
-      },
-    }));
-  };
-
-  const toggleField = (fieldId: string) => {
-    setFormData(prev => ({
-      ...prev,
-      include_fields: prev.include_fields.includes(fieldId)
-        ? prev.include_fields.filter(f => f !== fieldId)
-        : [...prev.include_fields, fieldId],
-    }));
-  };
-
-  const getStatusIcon = (status: Export['status']) => {
-    switch (status) {
-      case 'completed':
-        return <CheckCircle className="h-4 w-4 text-green-600" />;
-      case 'failed':
-        return <AlertCircle className="h-4 w-4 text-red-600" />;
-      case 'processing':
-        return <Clock className="h-4 w-4 text-blue-600 animate-spin" />;
-      case 'pending':
-        return <Clock className="h-4 w-4 text-yellow-600" />;
-      default:
-        return <FileText className="h-4 w-4 text-gray-400" />;
-    }
-  };
-
-  const getStatusVariant = (status: Export['status']): 'default' | 'secondary' | 'destructive' | 'success' => {
-    switch (status) {
-      case 'completed':
-        return 'success';
-      case 'failed':
-        return 'destructive';
-      case 'processing':
-        return 'default';
-      case 'pending':
-        return 'secondary';
-      default:
-        return 'secondary';
-    }
-  };
-
-  const getStatusLabel = (status: Export['status']) => {
-    const labels = {
-      pending: 'Venter',
-      processing: 'Behandler',
-      completed: 'Fullført',
-      failed: 'Feilet',
-    };
-    return labels[status] || status;
-  };
-
-  const getTypeIcon = (type: Export['type']) => {
-    switch (type) {
-      case 'csv':
-        return '📊';
-      case 'xlsx':
-        return '📈';
-      case 'json':
-        return '🔗';
-      default:
-        return '📄';
-    }
-  };
-
-  const handleDownload = async (exportItem: Export) => {
-    if (exportItem.status !== 'completed' || !exportItem.file_path) {
-      toast({
-        title: 'Kan ikke laste ned',
-        description: 'Eksporten er ikke fullført eller filen er ikke tilgjengelig.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    try {
-      // This would typically call an API endpoint to download the file
-      const filename = `${exportItem.name}.${exportItem.type}`;
-      toast({
-        title: 'Nedlasting startet',
-        description: `Laster ned ${filename}...`,
-      });
-
-      // Mock download - in real app this would trigger actual file download
-      console.log(`Downloading ${filename} from ${exportItem.file_path}`);
-    } catch (error) {
-      toast({
-        title: 'Nedlasting feilet',
-        description: 'Kunne ikke laste ned filen. Prøv igjen senere.',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const openViewDialog = (exportItem: Export) => {
-    setSelectedExport(exportItem);
-    setIsViewDialogOpen(true);
-  };
-
-  const isExpired = (exportItem: Export) => {
-    if (!exportItem.expires_at) return false;
-    return new Date(exportItem.expires_at) < new Date();
-  };
-
-  if (isLoading) {
-    return (
-      <div className="container mx-auto py-8">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Laster eksporter...</p>
-          </div>
-        </div>
-      </div>
-    );
   }
 
-  if (error) {
-    return (
-      <div className="container mx-auto py-8">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <AlertCircle className="h-8 w-8 text-red-600 mx-auto mb-4" />
-            <p className="text-red-600">Kunne ikke laste eksporter. Prøv igjen senere.</p>
-          </div>
-        </div>
-      </div>
-    );
+  const fetchStats = async () => {
+    try {
+      const response = await fetch('/api/exports/stats')
+      if (response.ok) {
+        const data = await response.json()
+        setStats(data)
+      }
+    } catch (error) {
+      console.error('Error fetching export stats:', error)
+    }
+  }
+
+  const handleCreateExport = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (!newExport.name.trim()) {
+      toast.error('Export name is required')
+      return
+    }
+
+    try {
+      setIsCreating(true)
+
+      const response = await fetch('/api/exports', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(newExport),
+      })
+
+      if (response.ok) {
+        toast.success('Export created successfully')
+        setShowCreateForm(false)
+        setNewExport({ name: '', type: 'csv', filters: '{}' })
+        fetchExports()
+        fetchStats()
+      } else {
+        const error = await response.text()
+        toast.error(`Failed to create export: ${error}`)
+      }
+    } catch (error) {
+      console.error('Error creating export:', error)
+      toast.error('Error creating export')
+    } finally {
+      setIsCreating(false)
+    }
+  }
+
+  const handleProcessExport = async (exportId: number) => {
+    try {
+      const response = await fetch(`/api/exports/${exportId}/process`, {
+        method: 'POST'
+      })
+
+      if (response.ok) {
+        toast.success('Export processing started')
+        fetchExports()
+        fetchStats()
+      } else {
+        toast.error('Failed to process export')
+      }
+    } catch (error) {
+      console.error('Error processing export:', error)
+      toast.error('Error processing export')
+    }
+  }
+
+  const handleDownloadExport = async (exportItem: Export) => {
+    try {
+      const response = await fetch(`/api/exports/${exportItem.id}/download`)
+
+      if (response.ok) {
+        const data = await response.json()
+        toast.success('Download link generated')
+        // In a real implementation, this would trigger a file download
+        console.log('Download info:', data)
+      } else {
+        toast.error('Failed to download export')
+      }
+    } catch (error) {
+      console.error('Error downloading export:', error)
+      toast.error('Error downloading export')
+    }
+  }
+
+  const handleDeleteExport = async (exportId: number) => {
+    if (!confirm('Are you sure you want to delete this export?')) {
+      return
+    }
+
+    try {
+      const response = await fetch(`/api/exports/${exportId}`, {
+        method: 'DELETE'
+      })
+
+      if (response.ok) {
+        toast.success('Export deleted successfully')
+        fetchExports()
+        fetchStats()
+      } else {
+        toast.error('Failed to delete export')
+      }
+    } catch (error) {
+      console.error('Error deleting export:', error)
+      toast.error('Error deleting export')
+    }
+  }
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'completed': return 'bg-green-500'
+      case 'pending': return 'bg-yellow-500'
+      case 'processing': return 'bg-blue-500'
+      case 'failed': return 'bg-red-500'
+      default: return 'bg-gray-500'
+    }
+  }
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 Bytes'
+    const k = 1024
+    const sizes = ['Bytes', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+  }
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString()
   }
 
   return (
-    <div className="container mx-auto py-8 space-y-8">
+    <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Eksporter</h1>
+          <h1 className="text-3xl font-bold">Data Exports</h1>
           <p className="text-muted-foreground">
-            Eksporter lead-data i ulike formater for videre bruk
+            Export and download your OSINT lead data
           </p>
         </div>
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={() => resetForm()}>
-              <Plus className="mr-2 h-4 w-4" />
-              Ny eksport
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Opprett ny eksport</DialogTitle>
-              <DialogDescription>
-                Velg data og format for eksporten av lead-informasjon.
-              </DialogDescription>
-            </DialogHeader>
-            <Tabs defaultValue="basic" className="space-y-4">
-              <TabsList>
-                <TabsTrigger value="basic">Grunnleggende</TabsTrigger>
-                <TabsTrigger value="filters">Filtre</TabsTrigger>
-                <TabsTrigger value="fields">Felt</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="basic" className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="col-span-2 space-y-2">
-                    <Label htmlFor="export-name">Eksportnavn</Label>
-                    <Input
-                      id="export-name"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      placeholder="f.eks. Verified Leads Q4 2024"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="export-type">Format</Label>
-                    <Select value={formData.type} onValueChange={(value: 'csv' | 'xlsx' | 'json') => setFormData({ ...formData, type: value })}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {EXPORT_TYPES.map(type => (
-                          <SelectItem key={type.value} value={type.value}>
-                            <div className="flex items-center space-x-2">
-                              <span className="text-lg">{getTypeIcon(type.value)}</span>
-                              <div>
-                                <div className="font-medium">{type.label}</div>
-                                <div className="text-sm text-muted-foreground">{type.description}</div>
-                              </div>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="filters" className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Verifikasjonsstatus</Label>
-                    <div className="flex flex-wrap gap-2">
-                      {VERIFICATION_STATUSES.map(status => {
-                        const isSelected = formData.filters.verification_status?.includes(status.value);
-                        return (
-                          <button
-                            key={status.value}
-                            type="button"
-                            className={`px-3 py-1 rounded-full text-sm transition-colors ${
-                              isSelected
-                                ? 'bg-primary text-primary-foreground'
-                                : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
-                            }`}
-                            onClick={() => {
-                              const current = formData.filters.verification_status || [];
-                              const updated = isSelected
-                                ? current.filter(s => s !== status.value)
-                                : [...current, status.value];
-                              updateFilter('verification_status', updated);
-                            }}
-                          >
-                            {status.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Konfidenspoeng</Label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <Label className="text-sm">Min</Label>
-                        <Input
-                          type="number"
-                          min="0"
-                          max="100"
-                          value={formData.filters.confidence_score_min || ''}
-                          onChange={(e) => updateFilter('confidence_score_min', e.target.value ? parseInt(e.target.value) : undefined)}
-                          placeholder="0"
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-sm">Maks</Label>
-                        <Input
-                          type="number"
-                          min="0"
-                          max="100"
-                          value={formData.filters.confidence_score_max || ''}
-                          onChange={(e) => updateFilter('confidence_score_max', e.target.value ? parseInt(e.target.value) : undefined)}
-                          placeholder="100"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Datoperiode</Label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <Label className="text-sm">Fra</Label>
-                        <Input
-                          type="date"
-                          value={formData.filters.date_from || ''}
-                          onChange={(e) => updateFilter('date_from', e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-sm">Til</Label>
-                        <Input
-                          type="date"
-                          value={formData.filters.date_to || ''}
-                          onChange={(e) => updateFilter('date_to', e.target.value)}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="domains">Domener (kommaseparert)</Label>
-                    <Textarea
-                      id="domains"
-                      value={formData.filters.domains?.join(', ') || ''}
-                      onChange={(e) => {
-                        const domains = e.target.value.split(',').map(d => d.trim()).filter(d => d);
-                        updateFilter('domains', domains);
-                      }}
-                      placeholder="example.com, another.no"
-                      rows={2}
-                    />
-                  </div>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="fields" className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Velg felt å inkludere i eksporten</Label>
-                  <div className="grid grid-cols-2 gap-4 max-h-64 overflow-y-auto">
-                    {AVAILABLE_FIELDS.map(field => (
-                      <div key={field.id} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={field.id}
-                          checked={formData.include_fields.includes(field.id)}
-                          onCheckedChange={() => toggleField(field.id)}
-                          disabled={field.essential}
-                        />
-                        <Label
-                          htmlFor={field.id}
-                          className={`text-sm ${field.essential ? 'font-medium' : ''}`}
-                        >
-                          {field.label}
-                          {field.essential && ' *'}
-                        </Label>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    * Essensielle felt kan ikke fjernes
-                  </p>
-                </div>
-              </TabsContent>
-            </Tabs>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-                Avbryt
-              </Button>
-              <Button
-                onClick={handleCreateExport}
-                disabled={createExportMutation.isPending || !formData.name.trim()}
-              >
-                {createExportMutation.isPending ? 'Starter...' : 'Start eksport'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <Button onClick={() => setShowCreateForm(true)}>
+          <Plus className="h-4 w-4 mr-2" />
+          New Export
+        </Button>
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center space-x-4">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-          <Input
-            placeholder="Søk eksporter..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10"
-          />
-        </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Alle statuser" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Alle statuser</SelectItem>
-            <SelectItem value="pending">Venter</SelectItem>
-            <SelectItem value="processing">Behandler</SelectItem>
-            <SelectItem value="completed">Fullført</SelectItem>
-            <SelectItem value="failed">Feilet</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={typeFilter} onValueChange={setTypeFilter}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Alle formater" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Alle formater</SelectItem>
-            <SelectItem value="csv">CSV</SelectItem>
-            <SelectItem value="xlsx">Excel</SelectItem>
-            <SelectItem value="json">JSON</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      {/* Stats Cards */}
+      {stats && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Exports</CardTitle>
+              <FileText className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.total_exports}</div>
+              <p className="text-xs text-muted-foreground">
+                {stats.recent_exports_7d} in last 7 days
+              </p>
+            </CardContent>
+          </Card>
 
-      {/* Exports Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Eksporthistorikk</CardTitle>
-          <CardDescription>
-            Oversikt over alle dine dataeksporter
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Navn</TableHead>
-                <TableHead>Format</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Fremgang</TableHead>
-                <TableHead>Leads</TableHead>
-                <TableHead>Størrelse</TableHead>
-                <TableHead>Opprettet</TableHead>
-                <TableHead>Utløper</TableHead>
-                <TableHead className="text-right">Handlinger</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredExports.map((exportItem) => (
-                <TableRow key={exportItem.id}>
-                  <TableCell>
-                    <div className="font-medium">{exportItem.name}</div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center space-x-2">
-                      <span className="text-lg">{getTypeIcon(exportItem.type)}</span>
-                      <span className="uppercase text-sm font-mono">{exportItem.type}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={getStatusVariant(exportItem.status)} className="flex items-center gap-1 w-fit">
-                      {getStatusIcon(exportItem.status)}
-                      {getStatusLabel(exportItem.status)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {exportItem.status === 'processing' ? (
-                      <div className="space-y-1">
-                        <Progress value={exportItem.progress} className="h-2" />
-                        <div className="text-xs text-muted-foreground">
-                          {exportItem.progress}%
-                        </div>
-                      </div>
-                    ) : (
-                      <span className="text-sm text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {exportItem.leads_count ? formatNumber(exportItem.leads_count) : '—'}
-                  </TableCell>
-                  <TableCell>
-                    {exportItem.file_size ? formatFileSize(exportItem.file_size) : '—'}
-                  </TableCell>
-                  <TableCell>
-                    <div className="text-sm">{formatRelativeTime(exportItem.created_at)}</div>
-                  </TableCell>
-                  <TableCell>
-                    {exportItem.expires_at ? (
-                      <div className={`text-sm ${isExpired(exportItem) ? 'text-red-600' : 'text-muted-foreground'}`}>
-                        {formatRelativeTime(exportItem.expires_at)}
-                      </div>
-                    ) : (
-                      <span className="text-sm text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                          <Settings className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => openViewDialog(exportItem)}>
-                          <Eye className="mr-2 h-4 w-4" />
-                          Vis detaljer
-                        </DropdownMenuItem>
-                        {exportItem.status === 'completed' && !isExpired(exportItem) && (
-                          <DropdownMenuItem onClick={() => handleDownload(exportItem)}>
-                            <Download className="mr-2 h-4 w-4" />
-                            Last ned
-                          </DropdownMenuItem>
-                        )}
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-red-600">
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Slett
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Completed</CardTitle>
+              <Download className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.completed_exports}</div>
+              <p className="text-xs text-muted-foreground">
+                Ready for download
+              </p>
+            </CardContent>
+          </Card>
 
-      {filteredExports.length === 0 && (
-        <div className="text-center py-12">
-          <FileText className="mx-auto h-12 w-12 text-muted-foreground" />
-          <h3 className="mt-4 text-lg font-medium">Ingen eksporter funnet</h3>
-          <p className="mt-2 text-muted-foreground">
-            {searchTerm || statusFilter !== 'all' || typeFilter !== 'all'
-              ? 'Prøv å justere filtreringsinnstillingene dine.'
-              : 'Kom i gang ved å opprette din første eksport.'
-            }
-          </p>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Pending</CardTitle>
+              <RefreshCw className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stats.pending_exports}</div>
+              <p className="text-xs text-muted-foreground">
+                In queue
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Size</CardTitle>
+              <Database className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{formatFileSize(stats.total_file_size_bytes)}</div>
+              <p className="text-xs text-muted-foreground">
+                All export files
+              </p>
+            </CardContent>
+          </Card>
         </div>
       )}
 
-      {/* View Details Dialog */}
-      <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{selectedExport?.name}</DialogTitle>
-            <DialogDescription>
-              Detaljer om eksporten
-            </DialogDescription>
-          </DialogHeader>
-          {selectedExport && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-sm font-medium">Status</Label>
-                  <div className="mt-1">
-                    <Badge variant={getStatusVariant(selectedExport.status)} className="flex items-center gap-1 w-fit">
-                      {getStatusIcon(selectedExport.status)}
-                      {getStatusLabel(selectedExport.status)}
-                    </Badge>
-                  </div>
+      {/* Create Export Form */}
+      {showCreateForm && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Create New Export</CardTitle>
+            <CardDescription>
+              Export your lead data in various formats
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleCreateExport} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="export-name">Export Name</Label>
+                  <Input
+                    id="export-name"
+                    value={newExport.name}
+                    onChange={(e) => setNewExport(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="Enter export name"
+                    required
+                  />
                 </div>
-                <div>
-                  <Label className="text-sm font-medium">Format</Label>
-                  <div className="mt-1 flex items-center space-x-2">
-                    <span className="text-lg">{getTypeIcon(selectedExport.type)}</span>
-                    <span className="uppercase text-sm font-mono">{selectedExport.type}</span>
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium">Antall leads</Label>
-                  <p className="mt-1 text-lg font-semibold">
-                    {selectedExport.leads_count ? formatNumber(selectedExport.leads_count) : '—'}
-                  </p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium">Filstørrelse</Label>
-                  <p className="mt-1 text-lg font-semibold">
-                    {selectedExport.file_size ? formatFileSize(selectedExport.file_size) : '—'}
-                  </p>
+
+                <div className="space-y-2">
+                  <Label htmlFor="export-type">Export Type</Label>
+                  <Select
+                    value={newExport.type}
+                    onValueChange={(value) => setNewExport(prev => ({ ...prev, type: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select export type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="csv">CSV</SelectItem>
+                      <SelectItem value="json">JSON</SelectItem>
+                      <SelectItem value="xlsx">Excel (XLSX)</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
-              {selectedExport.filters && Object.keys(selectedExport.filters).length > 0 && (
-                <div>
-                  <Label className="text-sm font-medium">Filtre anvendt</Label>
-                  <div className="mt-2 p-3 bg-muted rounded-md">
-                    <pre className="text-xs text-muted-foreground whitespace-pre-wrap">
-                      {JSON.stringify(selectedExport.filters, null, 2)}
-                    </pre>
-                  </div>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <Label className="text-sm font-medium">Opprettet</Label>
-                  <p className="mt-1">{formatRelativeTime(selectedExport.created_at)}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium">Fullført</Label>
-                  <p className="mt-1">
-                    {selectedExport.completed_at ? formatRelativeTime(selectedExport.completed_at) : '—'}
-                  </p>
-                </div>
+              <div className="flex space-x-2">
+                <Button type="submit" disabled={isCreating}>
+                  {isCreating ? 'Creating...' : 'Create Export'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowCreateForm(false)}
+                >
+                  Cancel
+                </Button>
               </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
 
-              {selectedExport.expires_at && (
-                <div>
-                  <Label className="text-sm font-medium">Utløper</Label>
-                  <p className={`mt-1 ${isExpired(selectedExport) ? 'text-red-600' : 'text-muted-foreground'}`}>
-                    {formatRelativeTime(selectedExport.expires_at)}
-                    {isExpired(selectedExport) && ' (Utløpt)'}
-                  </p>
-                </div>
-              )}
+      {/* Exports List */}
+      <Tabs defaultValue="all" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="all">All Exports</TabsTrigger>
+          <TabsTrigger value="completed">Completed</TabsTrigger>
+          <TabsTrigger value="pending">Pending</TabsTrigger>
+          <TabsTrigger value="failed">Failed</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="all" className="space-y-4">
+          {isLoading ? (
+            <div className="text-center py-8">Loading exports...</div>
+          ) : exports.length === 0 ? (
+            <Card>
+              <CardContent className="text-center py-8">
+                <p className="text-muted-foreground mb-4">No exports found</p>
+                <Button onClick={() => setShowCreateForm(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create your first export
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-4">
+              {exports.map((exportItem) => (
+                <Card key={exportItem.id}>
+                  <CardHeader>
+                    <div className="flex justify-between items-start">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <CardTitle>{exportItem.name}</CardTitle>
+                          <Badge
+                            variant="secondary"
+                            className={`text-white ${getStatusColor(exportItem.status)}`}
+                          >
+                            {exportItem.status}
+                          </Badge>
+                          <Badge variant="outline">
+                            {exportItem.type.toUpperCase()}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        {exportItem.status === 'pending' && (
+                          <Button
+                            size="sm"
+                            onClick={() => handleProcessExport(exportItem.id)}
+                          >
+                            <RefreshCw className="h-4 w-4 mr-1" />
+                            Process
+                          </Button>
+                        )}
+                        {exportItem.status === 'completed' && (
+                          <Button
+                            size="sm"
+                            onClick={() => handleDownloadExport(exportItem)}
+                          >
+                            <Download className="h-4 w-4 mr-1" />
+                            Download
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDeleteExport(exportItem.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+                      <div>
+                        <p className="text-muted-foreground">Progress</p>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 bg-gray-200 rounded-full h-2">
+                            <div
+                              className="bg-blue-600 h-2 rounded-full transition-all"
+                              style={{ width: `${exportItem.progress}%` }}
+                            />
+                          </div>
+                          <span className="text-xs">{exportItem.progress}%</span>
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Leads</p>
+                        <p className="font-medium">{exportItem.leads_count || 0}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">File Size</p>
+                        <p className="font-medium">
+                          {exportItem.file_size ? formatFileSize(exportItem.file_size) : 'N/A'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Created</p>
+                        <p className="font-medium">{formatDate(exportItem.created_at)}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Expires</p>
+                        <p className="font-medium">
+                          {exportItem.expires_at ? formatDate(exportItem.expires_at) : 'N/A'}
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           )}
-        </DialogContent>
-      </Dialog>
+        </TabsContent>
+
+        <TabsContent value="completed">
+          <div className="grid gap-4">
+            {exports.filter(e => e.status === 'completed').map((exportItem) => (
+              <Card key={exportItem.id}>
+                <CardHeader>
+                  <div className="flex justify-between items-start">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <CardTitle>{exportItem.name}</CardTitle>
+                        <Badge variant="secondary" className="text-white bg-green-500">
+                          {exportItem.status}
+                        </Badge>
+                        <Badge variant="outline">
+                          {exportItem.type.toUpperCase()}
+                        </Badge>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => handleDownloadExport(exportItem)}
+                      >
+                        <Download className="h-4 w-4 mr-1" />
+                        Download
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleDeleteExport(exportItem.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground">Leads</p>
+                      <p className="font-medium">{exportItem.leads_count || 0}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">File Size</p>
+                      <p className="font-medium">
+                        {exportItem.file_size ? formatFileSize(exportItem.file_size) : 'N/A'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Completed</p>
+                      <p className="font-medium">
+                        {exportItem.completed_at ? formatDate(exportItem.completed_at) : 'N/A'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Expires</p>
+                      <p className="font-medium">
+                        {exportItem.expires_at ? formatDate(exportItem.expires_at) : 'N/A'}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="pending">
+          <div className="grid gap-4">
+            {exports.filter(e => e.status === 'pending').map((exportItem) => (
+              <Card key={exportItem.id}>
+                <CardHeader>
+                  <div className="flex justify-between items-start">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <CardTitle>{exportItem.name}</CardTitle>
+                        <Badge variant="secondary" className="text-white bg-yellow-500">
+                          {exportItem.status}
+                        </Badge>
+                        <Badge variant="outline">
+                          {exportItem.type.toUpperCase()}
+                        </Badge>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => handleProcessExport(exportItem.id)}
+                      >
+                        <RefreshCw className="h-4 w-4 mr-1" />
+                        Process
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleDeleteExport(exportItem.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground">Created</p>
+                      <p className="font-medium">{formatDate(exportItem.created_at)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Type</p>
+                      <p className="font-medium">{exportItem.type.toUpperCase()}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="failed">
+          <div className="grid gap-4">
+            {exports.filter(e => e.status === 'failed').map((exportItem) => (
+              <Card key={exportItem.id}>
+                <CardHeader>
+                  <div className="flex justify-between items-start">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <CardTitle>{exportItem.name}</CardTitle>
+                        <Badge variant="secondary" className="text-white bg-red-500">
+                          {exportItem.status}
+                        </Badge>
+                        <Badge variant="outline">
+                          {exportItem.type.toUpperCase()}
+                        </Badge>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => handleProcessExport(exportItem.id)}
+                      >
+                        <RefreshCw className="h-4 w-4 mr-1" />
+                        Retry
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleDeleteExport(exportItem.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground">Failed</p>
+                      <p className="font-medium">{formatDate(exportItem.created_at)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Type</p>
+                      <p className="font-medium">{exportItem.type.toUpperCase()}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
-  );
+  )
 }
