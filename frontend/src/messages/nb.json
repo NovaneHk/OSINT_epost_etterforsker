@@ -1,0 +1,181 @@
+{
+  "common": {
+    "loading": "Laster...",
+    "error": "Feil",
+    "success": "Suksess",
+    "save": "Lagre",
+    "cancel": "Avbryt",
+    "delete": "Slett",
+    "edit": "Rediger",
+    "create": "Opprett",
+    "search": "Søk",
+    "filter": "Filtrer",
+    "export": "Eksporter",
+    "import": "Importer",
+    "refresh": "Oppdater",
+    "close": "Lukk",
+    "back": "Tilbake",
+    "next": "Neste",
+    "previous": "Forrige",
+    "confirm": "Bekreft",
+    "yes": "Ja",
+    "no": "Nei"
+  },
+  "navigation": {
+    "dashboard": "Dashboard",
+    "leads": "Leads",
+    "sources": "Kilder",
+    "runs": "Kjøringer",
+    "campaigns": "Segmenter",
+    "exports": "Eksporter",
+    "playbooks": "Playbooks",
+    "settings": "Innstillinger"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "welcomeMessage": "Velkommen til OSINT Lead Generator",
+    "kpis": {
+      "leads7d": "Leads (7d)",
+      "hits7d": "Treff (7d)",
+      "conversionRate": "Konverteringsrate",
+      "exports7d": "Eksporter (7d)",
+      "totalSources": "Totalt kilder",
+      "activeSources": "Aktive kilder"
+    },
+    "recentActivity": "Siste aktivitet",
+    "systemStatus": "Systemstatus",
+    "quickActions": "Hurtighandlinger",
+    "newRun": "Ny kjøring",
+    "exportLeads": "Eksporter leads"
+  },
+  "leads": {
+    "title": "Lead Management",
+    "searchPlaceholder": "Søk leads, företak, e-post...",
+    "noLeads": "Ingen leads funnet",
+    "loadingLeads": "Laster leads...",
+    "columns": {
+      "email": "E-post",
+      "name": "Navn",
+      "company": "Företag",
+      "title": "Tittel",
+      "location": "Sted",
+      "score": "Score",
+      "tags": "Tags",
+      "createdAt": "Opprettet",
+      "actions": "Handlinger"
+    },
+    "filters": {
+      "all": "Alle",
+      "highScore": "Høy score",
+      "verified": "Verifisert",
+      "recent": "Nylige"
+    },
+    "actions": {
+      "view": "Vis",
+      "edit": "Rediger",
+      "delete": "Slett",
+      "export": "Eksporter",
+      "verify": "Verifiser"
+    }
+  },
+  "sources": {
+    "title": "Datakilder",
+    "addSource": "Legg til kilde",
+    "status": {
+      "online": "Online",
+      "offline": "Offline",
+      "warning": "Advarsel"
+    },
+    "types": {
+      "web": "Web",
+      "api": "API",
+      "social": "Sosiale medier",
+      "registry": "Register"
+    }
+  },
+  "runs": {
+    "title": "Kjøringshistorikk",
+    "newRun": "Ny kjøring",
+    "status": {
+      "queued": "I kø",
+      "running": "Kjører",
+      "success": "Fullført",
+      "error": "Feil",
+      "partial": "Delvis"
+    },
+    "stats": {
+      "scanned": "Skannet",
+      "hits": "Treff",
+      "newLeads": "Nye leads",
+      "duplicates": "Duplikater"
+    }
+  },
+  "campaigns": {
+    "title": "Segmenter",
+    "createCampaign": "Opprett segment",
+    "queryBuilder": "Query Builder",
+    "savedSegments": "Lagrede segmenter"
+  },
+  "exports": {
+    "title": "Eksporter",
+    "createExport": "Opprett eksport",
+    "formats": {
+      "csv": "CSV",
+      "json": "JSON",
+      "parquet": "Parquet"
+    },
+    "status": {
+      "queued": "I kø",
+      "running": "Prosesserer",
+      "done": "Ferdig",
+      "error": "Feil"
+    }
+  },
+  "playbooks": {
+    "title": "Playbooks",
+    "createPlaybook": "Opprett playbook",
+    "pipelineEditor": "Pipeline Editor",
+    "nodeTypes": {
+      "source": "Kilde",
+      "filter": "Filter",
+      "enrich": "Berik",
+      "score": "Score",
+      "export": "Eksporter"
+    }
+  },
+  "settings": {
+    "title": "Innstillinger",
+    "sections": {
+      "general": "Generelt",
+      "sources": "Kilder",
+      "processing": "Prosessering",
+      "compliance": "Etterlevelse",
+      "users": "Brukere",
+      "api": "API"
+    }
+  },
+  "errors": {
+    "general": "Noe gikk galt. Prøv igjen senere.",
+    "network": "Nettverksfeil. Sjekk internetttilkoblingen din.",
+    "unauthorized": "Du har ikke tilgang til denne ressursen.",
+    "notFound": "Ressursen ble ikke funnet.",
+    "validation": "Valideringsfeil. Sjekk dataene dine.",
+    "server": "Serverfeil. Kontakt support hvis problemet vedvarer."
+  },
+  "shortcuts": {
+    "title": "Tastatursnarveier",
+    "navigation": "Navigasjon",
+    "actions": "Handlinger",
+    "dashboard": "Gå til Dashboard",
+    "leads": "Gå til Leads",
+    "sources": "Gå til Kilder",
+    "runs": "Gå til Kjøringer",
+    "campaigns": "Gå til Segmenter",
+    "exports": "Gå til Eksporter",
+    "playbooks": "Gå til Playbooks",
+    "settings": "Gå til Innstillinger",
+    "search": "Fokuser søk",
+    "export": "Hurtig eksport",
+    "close": "Lukk/Tøm"
+  }
+}

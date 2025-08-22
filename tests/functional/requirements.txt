@@ -1,0 +1,29 @@
+# Core testing dependencies
+pytest>=7.0.0
+requests>=2.28.0
+
+# Web testing with Selenium
+selenium>=4.15.0
+webdriver-manager>=4.0.0
+
+# Database drivers
+psycopg2-binary>=2.9.0
+pymongo>=4.0.0
+redis>=4.5.0
+
+# Authentication and security
+PyJWT>=2.8.0
+cryptography>=41.0.0
+
+# OSINT and network analysis
+dnspython>=2.4.0
+python-whois>=0.8.0
+email-validator>=2.1.0
+
+# Utility libraries
+python-dateutil>=2.8.0
+urllib3>=1.26.0
+
+# Optional dependencies for enhanced functionality
+beautifulsoup4>=4.12.0
+lxml>=4.9.0

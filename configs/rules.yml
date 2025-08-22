@@ -1,0 +1,295 @@
+# OSINT B2B Email System - Processing Rules Configuration
+# Define processing rules, validation thresholds, and compliance settings
+
+processing_rules:
+  rate_limiting:
+    requests_per_second: 2.0
+    max_concurrent: 10
+    retry_attempts: 3
+    backoff_multiplier: 2
+    respect_crawl_delay: true
+    burst_limit: 5
+    cooldown_period: 60  # seconds
+
+  validation_thresholds:
+    min_confidence_score: 0.6
+    max_risk_score: 30
+    require_mx_validation: true
+    smtp_probe_enabled: false
+    domain_blacklist_check: true
+    disposable_email_check: true
+
+  scoring_weights:
+    persona_match: 0.35
+    sector_relevance: 0.25
+    geographic_preference: 0.20
+    source_credibility: 0.15
+    data_freshness: 0.05
+
+  filtering_rules:
+    exclude_consumer_domains: true
+    exclude_educational: true
+    exclude_government: false
+    min_company_size: 10
+    max_personal_email_ratio: 0.1
+    require_business_domain: true
+
+  data_quality:
+    min_extraction_confidence: 0.5
+    dedupe_similarity_threshold: 0.85
+    context_analysis_enabled: true
+    role_classification_required: true
+
+compliance_settings:
+  data_retention_days: 90
+  audit_logging: true
+  gdpr_compliance_mode: true
+  automatic_opt_out: true
+  privacy_policy_url: "https://yourcompany.com/privacy"
+  data_controller: "Your Company Name"
+  dpo_contact: "dpo@yourcompany.com"
+  legal_basis: "legitimate_interest"
+  processing_purpose: "b2b_marketing"
+
+  consent_requirements:
+    explicit_consent_required: false  # B2B legitimate interest
+    opt_in_tracking: false
+    cookie_consent: true
+
+  data_subject_rights:
+    access_request_email: "privacy@yourcompany.com"
+    deletion_request_email: "privacy@yourcompany.com"
+    rectification_enabled: true
+    portability_enabled: true
+    objection_handling: true
+
+geographic_targeting:
+  nordics:
+    countries: ["NO", "SE", "DK", "FI", "IS"]
+    languages: ["nb", "sv", "da", "fi", "is", "en"]
+    tld_preferences: [".no", ".se", ".dk", ".fi", ".is"]
+    scoring_boost: 20
+    timezone: "Europe/Oslo"
+    business_hours:
+      start: "08:00"
+      end: "17:00"
+
+  dach:
+    countries: ["DE", "AT", "CH"]
+    languages: ["de", "en"]
+    tld_preferences: [".de", ".at", ".ch"]
+    scoring_boost: 15
+    timezone: "Europe/Berlin"
+    business_hours:
+      start: "09:00"
+      end: "18:00"
+
+  eu_core:
+    countries: ["FR", "NL", "BE", "LU", "IE"]
+    languages: ["fr", "nl", "en"]
+    tld_preferences: [".fr", ".nl", ".be", ".eu", ".ie"]
+    scoring_boost: 10
+    timezone: "Europe/Paris"
+    business_hours:
+      start: "09:00"
+      end: "17:30"
+
+  uk_ireland:
+    countries: ["GB", "IE"]
+    languages: ["en"]
+    tld_preferences: [".uk", ".co.uk", ".ie"]
+    scoring_boost: 12
+    timezone: "Europe/London"
+    business_hours:
+      start: "09:00"
+      end: "17:00"
+
+sector_definitions:
+  technology:
+    keywords:
+      - "SaaS"
+      - "software"
+      - "tech"
+      - "digital"
+      - "cloud"
+      - "AI"
+      - "machine learning"
+      - "data science"
+      - "cybersecurity"
+      - "fintech"
+      - "edtech"
+      - "healthtech"
+    negative_keywords:
+      - "hardware manufacturing"
+      - "physical products"
+    technology_signals:
+      - "React"
+      - "Angular"
+      - "Vue.js"
+      - "Python"
+      - "JavaScript"
+      - "AWS"
+      - "Azure"
+      - "Google Cloud"
+    size_indicators:
+      - "startup"
+      - "scale-up"
+      - "enterprise"
+    scoring_multiplier: 1.5
+
+  ecommerce:
+    keywords:
+      - "e-commerce"
+      - "retail"
+      - "online store"
+      - "webshop"
+      - "marketplace"
+      - "dropshipping"
+      - "fulfillment"
+    technology_signals:
+      - "Shopify"
+      - "WooCommerce"
+      - "Magento"
+      - "BigCommerce"
+      - "Stripe"
+      - "PayPal"
+    size_indicators:
+      - "GMV"
+      - "orders"
+      - "customers"
+      - "SKUs"
+    scoring_multiplier: 1.3
+
+  manufacturing:
+    keywords:
+      - "manufacturing"
+      - "production"
+      - "industrial"
+      - "factory"
+      - "assembly"
+      - "logistics"
+      - "supply chain"
+    negative_keywords:
+      - "retail"
+      - "service only"
+    size_indicators:
+      - "employees"
+      - "facilities"
+      - "revenue"
+      - "capacity"
+    scoring_multiplier: 1.0
+
+  consulting:
+    keywords:
+      - "consulting"
+      - "advisory"
+      - "professional services"
+      - "strategy"
+      - "management consulting"
+      - "IT consulting"
+    size_indicators:
+      - "consultants"
+      - "partners"
+      - "practice areas"
+    scoring_multiplier: 1.1
+
+  finance:
+    keywords:
+      - "financial services"
+      - "banking"
+      - "investment"
+      - "insurance"
+      - "accounting"
+      - "audit"
+      - "wealth management"
+    size_indicators:
+      - "AUM"
+      - "assets"
+      - "clients"
+    scoring_multiplier: 1.2
+
+validation_rules:
+  email_format:
+    max_length: 254
+    min_length: 6
+    allow_plus_addressing: true
+    require_valid_tld: true
+
+  domain_validation:
+    check_mx_records: true
+    check_a_records: true
+    blacklist_disposable: true
+    whitelist_business_domains: true
+
+  risk_assessment:
+    disposable_email_penalty: 50
+    consumer_domain_penalty: 30
+    suspicious_pattern_penalty: 25
+    new_domain_penalty: 20
+
+  content_analysis:
+    context_window_size: 200
+    min_business_indicators: 2
+    negative_indicator_penalty: 20
+
+export_settings:
+  default_formats: ["csv", "jsonl"]
+  include_compliance_headers: true
+  include_audit_trail: true
+  max_records_per_file: 10000
+
+  format_settings:
+    csv:
+      delimiter: ","
+      quote_char: '"'
+      escape_char: "\\"
+      line_terminator: "\n"
+
+    jsonl:
+      ensure_ascii: false
+      indent: null
+      separators: [",", ":"]
+
+    excel:
+      engine: "openpyxl"
+      include_summary_sheet: true
+      freeze_panes: true
+
+monitoring_settings:
+  health_check_interval: 300  # seconds
+  alert_thresholds:
+    error_rate: 10  # percentage
+    processing_delay: 3600  # seconds
+    disk_usage: 85  # percentage
+    memory_usage: 80  # percentage
+
+  logging:
+    level: "INFO"
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    file_rotation: true
+    max_file_size: "10MB"
+    backup_count: 5
+
+resource_thresholds:
+  cpu_warning: 70
+  cpu_critical: 90
+  memory_warning: 80
+  memory_critical: 95
+  disk_warning: 85
+  disk_critical: 95
+
+security_settings:
+  user_agent_rotation: true
+  proxy_rotation: false  # Set to true if using proxies
+  request_timeout: 30
+  max_redirects: 5
+  verify_ssl: true
+
+  headers:
+    respect_robots_txt: true
+    add_referrer: false
+    custom_headers:
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      "Accept-Language": "en-US,en;q=0.5"
+      "Accept-Encoding": "gzip, deflate"
+      "Connection": "keep-alive"

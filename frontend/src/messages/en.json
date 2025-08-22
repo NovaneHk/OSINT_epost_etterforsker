@@ -1,0 +1,181 @@
+{
+  "common": {
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "search": "Search",
+    "filter": "Filter",
+    "export": "Export",
+    "import": "Import",
+    "refresh": "Refresh",
+    "close": "Close",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "confirm": "Confirm",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "navigation": {
+    "dashboard": "Dashboard",
+    "leads": "Leads",
+    "sources": "Sources",
+    "runs": "Runs",
+    "campaigns": "Campaigns",
+    "exports": "Exports",
+    "playbooks": "Playbooks",
+    "settings": "Settings"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "welcomeMessage": "Welcome to OSINT Lead Generator",
+    "kpis": {
+      "leads7d": "Leads (7d)",
+      "hits7d": "Hits (7d)",
+      "conversionRate": "Conversion Rate",
+      "exports7d": "Exports (7d)",
+      "totalSources": "Total Sources",
+      "activeSources": "Active Sources"
+    },
+    "recentActivity": "Recent Activity",
+    "systemStatus": "System Status",
+    "quickActions": "Quick Actions",
+    "newRun": "New Run",
+    "exportLeads": "Export Leads"
+  },
+  "leads": {
+    "title": "Lead Management",
+    "searchPlaceholder": "Search leads, companies, emails...",
+    "noLeads": "No leads found",
+    "loadingLeads": "Loading leads...",
+    "columns": {
+      "email": "Email",
+      "name": "Name",
+      "company": "Company",
+      "title": "Title",
+      "location": "Location",
+      "score": "Score",
+      "tags": "Tags",
+      "createdAt": "Created",
+      "actions": "Actions"
+    },
+    "filters": {
+      "all": "All",
+      "highScore": "High Score",
+      "verified": "Verified",
+      "recent": "Recent"
+    },
+    "actions": {
+      "view": "View",
+      "edit": "Edit",
+      "delete": "Delete",
+      "export": "Export",
+      "verify": "Verify"
+    }
+  },
+  "sources": {
+    "title": "Data Sources",
+    "addSource": "Add Source",
+    "status": {
+      "online": "Online",
+      "offline": "Offline",
+      "warning": "Warning"
+    },
+    "types": {
+      "web": "Web",
+      "api": "API",
+      "social": "Social Media",
+      "registry": "Registry"
+    }
+  },
+  "runs": {
+    "title": "Run History",
+    "newRun": "New Run",
+    "status": {
+      "queued": "Queued",
+      "running": "Running",
+      "success": "Success",
+      "error": "Error",
+      "partial": "Partial"
+    },
+    "stats": {
+      "scanned": "Scanned",
+      "hits": "Hits",
+      "newLeads": "New Leads",
+      "duplicates": "Duplicates"
+    }
+  },
+  "campaigns": {
+    "title": "Campaigns",
+    "createCampaign": "Create Campaign",
+    "queryBuilder": "Query Builder",
+    "savedSegments": "Saved Segments"
+  },
+  "exports": {
+    "title": "Exports",
+    "createExport": "Create Export",
+    "formats": {
+      "csv": "CSV",
+      "json": "JSON",
+      "parquet": "Parquet"
+    },
+    "status": {
+      "queued": "Queued",
+      "running": "Processing",
+      "done": "Done",
+      "error": "Error"
+    }
+  },
+  "playbooks": {
+    "title": "Playbooks",
+    "createPlaybook": "Create Playbook",
+    "pipelineEditor": "Pipeline Editor",
+    "nodeTypes": {
+      "source": "Source",
+      "filter": "Filter",
+      "enrich": "Enrich",
+      "score": "Score",
+      "export": "Export"
+    }
+  },
+  "settings": {
+    "title": "Settings",
+    "sections": {
+      "general": "General",
+      "sources": "Sources",
+      "processing": "Processing",
+      "compliance": "Compliance",
+      "users": "Users",
+      "api": "API"
+    }
+  },
+  "errors": {
+    "general": "Something went wrong. Please try again later.",
+    "network": "Network error. Check your internet connection.",
+    "unauthorized": "You don't have access to this resource.",
+    "notFound": "Resource not found.",
+    "validation": "Validation error. Check your data.",
+    "server": "Server error. Contact support if the problem persists."
+  },
+  "shortcuts": {
+    "title": "Keyboard Shortcuts",
+    "navigation": "Navigation",
+    "actions": "Actions",
+    "dashboard": "Go to Dashboard",
+    "leads": "Go to Leads",
+    "sources": "Go to Sources",
+    "runs": "Go to Runs",
+    "campaigns": "Go to Campaigns",
+    "exports": "Go to Exports",
+    "playbooks": "Go to Playbooks",
+    "settings": "Go to Settings",
+    "search": "Focus Search",
+    "export": "Quick Export",
+    "close": "Close/Clear"
+  }
+}

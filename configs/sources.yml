@@ -1,0 +1,215 @@
+# OSINT B2B Email System - Sources Configuration
+# Define data sources for company and contact discovery
+
+source_categories:
+  directories:
+    description: "Business directory sources"
+    priority: 1
+    daily_limit: 1000
+    rate_limit: 2.0  # requests per second
+    sources:
+      - name: "Norwegian Chamber of Commerce"
+        url: "https://www.chamber.no/member-directory"
+        type: "static"
+        company_selector: ".member-item"
+        name_selector: ".company-name"
+        contact_selector: ".contact-link"
+        credibility_score: 95
+        enabled: true
+
+      - name: "Nordic Tech Directory"
+        url: "https://nordictech.directory/companies"
+        type: "dynamic"
+        wait_selector: ".company-grid"
+        pagination: true
+        credibility_score: 85
+        enabled: true
+
+      - name: "Danish Business Directory"
+        url: "https://www.krak.dk/virksomhed"
+        type: "static"
+        credibility_score: 90
+        enabled: true
+
+      - name: "Swedish Companies House"
+        url: "https://www.bolagsverket.se"
+        type: "static"
+        credibility_score: 95
+        enabled: false  # Requires special handling
+
+      - name: "Finnish Business Directory"
+        url: "https://www.finder.fi/companies"
+        type: "dynamic"
+        credibility_score: 88
+        enabled: true
+
+  events:
+    description: "Event and conference sources"
+    priority: 2
+    daily_limit: 500
+    rate_limit: 1.5
+    sources:
+      - name: "TechCrunch Disrupt Exhibitors"
+        url: "https://techcrunch.com/events/disrupt/exhibitors"
+        type: "dynamic"
+        credibility_score: 90
+        enabled: true
+
+      - name: "Web Summit Startups"
+        url: "https://websummit.com/startups"
+        type: "static"
+        credibility_score: 85
+        enabled: true
+
+      - name: "Nordic Startup Awards"
+        url: "https://nordicstartupawards.com/companies"
+        type: "dynamic"
+        credibility_score: 88
+        enabled: true
+
+      - name: "Slush Conference Participants"
+        url: "https://www.slush.org/companies"
+        type: "dynamic"
+        credibility_score: 92
+        enabled: true
+
+      - name: "Arctic15 Startups"
+        url: "https://arctic15.com/startups"
+        type: "static"
+        credibility_score: 85
+        enabled: true
+
+  company_sites:
+    description: "Individual company website crawling"
+    priority: 3
+    daily_limit: 2000
+    rate_limit: 1.0
+    crawl_patterns:
+      - "/about"
+      - "/contact"
+      - "/team"
+      - "/press"
+      - "/investors"
+      - "/leadership"
+      - "/management"
+      - "/careers"
+
+  social_platforms:
+    description: "Social media and professional platforms"
+    priority: 4
+    daily_limit: 1500
+    rate_limit: 0.5  # More conservative for social platforms
+    sources:
+      - name: "LinkedIn Company Pages"
+        url: "https://www.linkedin.com/company/"
+        type: "dynamic"
+        credibility_score: 95
+        enabled: false  # Requires LinkedIn API
+
+      - name: "Twitter/X Business Profiles"
+        url: "https://twitter.com/"
+        type: "dynamic"
+        credibility_score: 70
+        enabled: false  # Requires Twitter API
+
+      - name: "GitHub Organizations"
+        url: "https://github.com/orgs/"
+        type: "static"
+        credibility_score: 85
+        enabled: true
+
+search_dorks:
+  technology:
+    description: "Search patterns for technology companies"
+    patterns:
+      - 'inurl:about-us "CTO" OR "technology"'
+      - 'site:crunchbase.com {geo} tech startup'
+      - '"software company" {geo} contact'
+      - 'intitle:"team" "CTO" OR "tech lead" {geo}'
+      - 'site:github.com {geo} organization'
+      - '"engineering team" {geo} contact'
+      - 'inurl:careers "software engineer" {geo}'
+
+  ecommerce:
+    description: "Search patterns for e-commerce companies"
+    patterns:
+      - 'powered by shopify {geo}'
+      - 'inurl:contact "e-commerce" OR "online store"'
+      - '"webshop" OR "online retail" {geo}'
+      - 'site:shopify.com {geo} store'
+      - '"woocommerce" {geo} shop'
+      - 'inurl:shop "contact us" {geo}'
+
+  manufacturing:
+    description: "Search patterns for manufacturing companies"
+    patterns:
+      - '"manufacturing company" {geo} contact'
+      - 'intitle:"about us" manufacturing {geo}'
+      - '"industrial" OR "production" {geo} team'
+      - 'inurl:products manufacturing {geo}'
+      - '"factory" OR "plant" {geo} contact'
+
+  consulting:
+    description: "Search patterns for consulting companies"
+    patterns:
+      - '"consulting" {geo} "contact us"'
+      - 'intitle:"about" consulting {geo}'
+      - '"advisory" OR "consultancy" {geo}'
+      - 'inurl:services consulting {geo}'
+
+geographic_focus:
+  nordics:
+    countries: ["NO", "SE", "DK", "FI", "IS"]
+    languages: ["nb", "sv", "da", "fi", "is", "en"]
+    tld_preferences: [".no", ".se", ".dk", ".fi", ".is"]
+    search_modifiers:
+      - "norway OR norwegian"
+      - "sweden OR swedish"
+      - "denmark OR danish"
+      - "finland OR finnish"
+      - "iceland OR icelandic"
+      - "nordic OR scandinavia"
+
+  dach:
+    countries: ["DE", "AT", "CH"]
+    languages: ["de", "en"]
+    tld_preferences: [".de", ".at", ".ch"]
+    search_modifiers:
+      - "germany OR german"
+      - "austria OR austrian"
+      - "switzerland OR swiss"
+      - "dach region"
+
+  eu_core:
+    countries: ["FR", "NL", "BE", "LU", "IE"]
+    languages: ["fr", "nl", "en"]
+    tld_preferences: [".fr", ".nl", ".be", ".eu", ".ie"]
+    search_modifiers:
+      - "france OR french"
+      - "netherlands OR dutch"
+      - "belgium OR belgian"
+      - "ireland OR irish"
+      - "luxembourg"
+
+scraping_settings:
+  user_agents:
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    - "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+
+  request_headers:
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+    Accept-Language: "en-US,en;q=0.5"
+    Accept-Encoding: "gzip, deflate"
+    Connection: "keep-alive"
+    Upgrade-Insecure-Requests: "1"
+
+  timeouts:
+    connect: 10
+    read: 30
+    total: 60
+
+  retry_settings:
+    max_retries: 3
+    backoff_factor: 2
+    status_forcelist: [500, 502, 503, 504, 429]

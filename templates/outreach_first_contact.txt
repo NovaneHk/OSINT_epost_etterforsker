@@ -1,0 +1,19 @@
+Subject: Quick introduction – {{value_proposition}} for {{company}}
+
+Hi {{role_title}},
+
+We found this contact address publicly listed on {{source_domain}}. We specialize in {{solution_area}} for {{industry}} companies in {{geography}}.
+
+Brief context: {{personalized_value_statement}}.
+
+If this isn't relevant for {{company}}, just let us know with a quick reply – we'll remove you immediately.
+
+Privacy policy: {{privacy_policy_url}}
+
+Best regards,
+{{sender_name}} – {{sender_company}}
+
+---
+Opt-out: Reply "STOP" or visit {{opt_out_url}}
+Legal basis: Legitimate business interest (GDPR Art. 6(1)(f))
+Data source: {{source_url}}

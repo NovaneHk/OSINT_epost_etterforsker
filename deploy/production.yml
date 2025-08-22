@@ -1,0 +1,183 @@
+# Production Deployment Configuration for OSINT B2B Email System
+# This file contains production-specific settings and deployment parameters
+
+apiVersion: v1
+kind: production-config
+metadata:
+  name: osint-b2b-email-system
+  version: "1.0.0"
+  environment: production
+
+# Production System Configuration
+system:
+  # Application Settings
+  app_name: "OSINT B2B Email System"
+  version: "1.0.0"
+  environment: "production"
+  debug: false
+  log_level: "INFO"
+
+  # Security Settings
+  secret_key: "${SECRET_KEY}"  # Set via environment variable
+  allowed_hosts:
+    - "localhost"
+    - "127.0.0.1"
+    - "${PRODUCTION_DOMAIN}"  # Set via environment variable
+
+  # Database Configuration
+  database:
+    type: "postgresql"  # Production uses PostgreSQL
+    host: "${DB_HOST}"
+    port: "${DB_PORT}"
+    name: "${DB_NAME}"
+    user: "${DB_USER}"
+    password: "${DB_PASSWORD}"
+    pool_size: 20
+    max_overflow: 30
+    pool_timeout: 30
+    pool_recycle: 3600
+
+  # Redis Configuration (for caching and rate limiting)
+  redis:
+    host: "${REDIS_HOST}"
+    port: "${REDIS_PORT}"
+    password: "${REDIS_PASSWORD}"
+    db: 0
+    max_connections: 50
+
+  # Web Scraping Configuration
+  scraping:
+    rate_limit: 2.0  # Conservative rate for production
+    max_concurrent: 10
+    timeout: 30
+    retry_attempts: 3
+    user_agent_rotation: true
+    respect_robots: true
+    cache_enabled: true
+    cache_ttl: 3600
+
+  # Email Configuration
+  email:
+    smtp_host: "${SMTP_HOST}"
+    smtp_port: "${SMTP_PORT}"
+    smtp_user: "${SMTP_USER}"
+    smtp_password: "${SMTP_PASSWORD}"
+    use_tls: true
+    from_email: "${FROM_EMAIL}"
+
+  # Monitoring Configuration
+  monitoring:
+    health_check_interval: 300  # 5 minutes
+    metrics_enabled: true
+    alerting_enabled: true
+    log_retention_days: 90
+    backup_enabled: true
+    backup_interval: "daily"
+
+  # Security and Compliance
+  security:
+    gdpr_compliance: true
+    data_retention_days: 365
+    audit_logging: true
+    encryption_at_rest: true
+    ssl_required: true
+    api_rate_limiting: true
+
+# Resource Limits
+resources:
+  memory_limit: "2Gi"
+  cpu_limit: "1000m"
+  memory_request: "1Gi"
+  cpu_request: "500m"
+
+# Scaling Configuration
+scaling:
+  min_replicas: 2
+  max_replicas: 10
+  target_cpu_utilization: 70
+  target_memory_utilization: 80
+
+# Load Balancer Configuration
+load_balancer:
+  type: "nginx"
+  ssl_termination: true
+  health_check_path: "/health"
+  timeout: 30
+
+# Backup Configuration
+backup:
+  enabled: true
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retention_days: 30
+  encryption: true
+  storage_type: "s3"
+  bucket_name: "${BACKUP_BUCKET}"
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "json"
+  destination: "file"
+  file_path: "/var/log/osint-b2b/app.log"
+  max_file_size: "100MB"
+  backup_count: 10
+  syslog_enabled: true
+  remote_logging:
+    enabled: true
+    endpoint: "${LOG_ENDPOINT}"
+    api_key: "${LOG_API_KEY}"
+
+# Alerting Configuration
+alerting:
+  slack:
+    webhook_url: "${SLACK_WEBHOOK_URL}"
+    channel: "#osint-alerts"
+  email:
+    recipients:
+      - "${ADMIN_EMAIL}"
+    smtp_settings:
+      host: "${ALERT_SMTP_HOST}"
+      port: 587
+
+# Performance Tuning
+performance:
+  worker_processes: 4
+  worker_connections: 1000
+  keepalive_timeout: 65
+  client_max_body_size: "100M"
+  proxy_connect_timeout: 60
+  proxy_send_timeout: 60
+  proxy_read_timeout: 60
+
+# Feature Flags
+features:
+  advanced_analytics: true
+  real_time_processing: true
+  api_access: true
+  bulk_operations: true
+  export_formats: ["csv", "json", "excel"]
+
+# Third-party Integrations
+integrations:
+  clearbit:
+    enabled: false
+    api_key: "${CLEARBIT_API_KEY}"
+  hunter:
+    enabled: false
+    api_key: "${HUNTER_API_KEY}"
+  linkedin:
+    enabled: false
+    client_id: "${LINKEDIN_CLIENT_ID}"
+    client_secret: "${LINKEDIN_CLIENT_SECRET}"
+
+# Compliance Settings
+compliance:
+  gdpr:
+    enabled: true
+    data_controller: "${DATA_CONTROLLER}"
+    dpo_contact: "${DPO_EMAIL}"
+    privacy_policy_url: "${PRIVACY_POLICY_URL}"
+  ccpa:
+    enabled: true
+  audit_trail: true
+  data_anonymization: true

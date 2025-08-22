@@ -1,0 +1,156 @@
+# OSINT B2B Email System - Personas Configuration
+# Define target personas for lead generation
+
+personas:
+  technical_leaders:
+    description: "Technical decision makers and engineering leaders"
+    roles:
+      - "CTO"
+      - "Tech Lead"
+      - "VP Engineering"
+      - "Head of Technology"
+      - "Technical Director"
+      - "Chief Technology Officer"
+      - "Engineering Manager"
+      - "Software Architect"
+      - "Dev Lead"
+      - "Technology Lead"
+    email_patterns:
+      - "cto@"
+      - "tech@"
+      - "engineering@"
+      - "dev@"
+      - "technical@"
+      - "architect@"
+      - "devops@"
+    negative_signals:
+      - "intern"
+      - "junior"
+      - "assistant"
+      - "coordinator"
+      - "trainee"
+    scoring_weight: 40
+    priority_level: "high"
+
+  procurement_specialists:
+    description: "Procurement and purchasing decision makers"
+    roles:
+      - "Procurement Manager"
+      - "Purchasing Director"
+      - "Supply Chain Manager"
+      - "Buyer"
+      - "Sourcing Manager"
+      - "Head of Procurement"
+      - "Chief Procurement Officer"
+      - "Vendor Manager"
+      - "Supplier Manager"
+    email_patterns:
+      - "procurement@"
+      - "purchasing@"
+      - "sourcing@"
+      - "buyer@"
+      - "supply@"
+      - "vendor@"
+    negative_signals:
+      - "assistant"
+      - "clerk"
+      - "junior"
+      - "coordinator"
+    scoring_weight: 35
+    priority_level: "high"
+
+  operations_leaders:
+    description: "Operations and administrative leaders"
+    roles:
+      - "COO"
+      - "Operations Manager"
+      - "Head of Operations"
+      - "VP Operations"
+      - "Operations Director"
+      - "General Manager"
+      - "Business Operations"
+    email_patterns:
+      - "ops@"
+      - "operations@"
+      - "coo@"
+      - "admin@"
+      - "general@"
+    negative_signals:
+      - "coordinator"
+      - "assistant"
+      - "clerk"
+      - "junior"
+    scoring_weight: 30
+    priority_level: "medium"
+
+  sales_leaders:
+    description: "Sales and business development leaders"
+    roles:
+      - "Sales Director"
+      - "VP Sales"
+      - "Head of Sales"
+      - "Business Development"
+      - "Revenue Operations"
+      - "Chief Revenue Officer"
+      - "Commercial Director"
+      - "Sales Manager"
+    email_patterns:
+      - "sales@"
+      - "business@"
+      - "bd@"
+      - "revenue@"
+      - "commercial@"
+    negative_signals:
+      - "rep"
+      - "junior"
+      - "assistant"
+      - "intern"
+    scoring_weight: 25
+    priority_level: "medium"
+
+  marketing_leaders:
+    description: "Marketing and communications leaders"
+    roles:
+      - "CMO"
+      - "Marketing Director"
+      - "VP Marketing"
+      - "Head of Marketing"
+      - "Brand Manager"
+      - "Communications Director"
+      - "Growth Manager"
+    email_patterns:
+      - "marketing@"
+      - "brand@"
+      - "growth@"
+      - "communications@"
+      - "pr@"
+      - "cmo@"
+    negative_signals:
+      - "coordinator"
+      - "assistant"
+      - "intern"
+      - "junior"
+    scoring_weight: 20
+    priority_level: "low"
+
+  finance_leaders:
+    description: "Finance and accounting decision makers"
+    roles:
+      - "CFO"
+      - "Finance Director"
+      - "Controller"
+      - "Head of Finance"
+      - "Accounting Manager"
+      - "Financial Controller"
+    email_patterns:
+      - "finance@"
+      - "cfo@"
+      - "accounting@"
+      - "controller@"
+    negative_signals:
+      - "assistant"
+      - "clerk"
+      - "junior"
+      - "bookkeeper"
+    scoring_weight: 15
+    priority_level: "low"
