@@ -1,0 +1,147 @@
+# OSINT E-post Etterforsker - Integration Configuration
+# This file defines how frontend and backend components integrate
+
+system:
+  name: "OSINT E-post Etterforsker"
+  version: "1.0.0"
+  description: "Complete OSINT Email Investigation Platform"
+
+# Environment configuration
+environments:
+  development:
+    frontend:
+      port: 3000
+      host: "localhost"
+      api_url: "http://localhost:8000"
+      websocket_url: "ws://localhost:8000/ws"
+      hot_reload: true
+      debug: true
+
+    backend:
+      port: 8000
+      host: "0.0.0.0"
+      database_url: "sqlite:///./data/osint_cache.db"
+      debug: true
+      environment: "development"
+
+    integration:
+      cors_enabled: true
+      cors_origins:
+        - "http://localhost:3000"
+        - "http://127.0.0.1:3000"
+      session_cookies: true
+      api_prefix: "/api"
+
+  production:
+    frontend:
+      port: 3000
+      host: "0.0.0.0"
+      api_url: "https://api.osint-etterforsker.no"
+      websocket_url: "wss://api.osint-etterforsker.no/ws"
+      hot_reload: false
+      debug: false
+
+    backend:
+      port: 8000
+      host: "0.0.0.0"
+      database_url: "postgresql://user:password@db:5432/osint_db"
+      debug: false
+      environment: "production"
+
+    integration:
+      cors_enabled: true
+      cors_origins:
+        - "https://osint-etterforsker.no"
+        - "https://www.osint-etterforsker.no"
+      session_cookies: true
+      api_prefix: "/api"
+      ssl_enabled: true
+
+# API Endpoint mapping - ensures frontend calls match backend routes
+api_endpoints:
+  # Dashboard endpoints
+  kpis: "/api/kpis/"
+  activity: "/api/activity/"
+  health: "/api/health"
+
+  # Core CRUD endpoints
+  leads: "/api/leads/"
+  sources: "/api/sources/"
+  campaigns: "/api/campaigns/"
+  exports: "/api/exports/"
+  runs: "/api/runs/"
+
+  # Authentication endpoints
+  auth_login: "/api/auth/login"
+  auth_register: "/api/auth/register"
+  auth_refresh: "/api/auth/refresh"
+  auth_logout: "/api/auth/logout"
+
+  # Management endpoints
+  users: "/api/users/"
+  settings: "/api/settings/"
+
+# WebSocket event mapping
+websocket_events:
+  # Run events
+  run_started: "run_update"
+  run_progress: "run_update"
+  run_completed: "run_complete"
+  run_error: "run_error"
+
+  # Lead events
+  lead_created: "lead_created"
+  lead_updated: "lead_updated"
+
+  # Export events
+  export_started: "export_started"
+  export_completed: "export_complete"
+
+  # Source events
+  source_status_change: "source_status_change"
+
+# Feature flags for integration
+features:
+  real_time_updates: true
+  websocket_enabled: true
+  file_uploads: true
+  bulk_operations: true
+  data_exports: true
+  email_verification: true
+  social_enrichment: false  # Will be enabled in advanced features phase
+
+# Security configuration
+security:
+  jwt_enabled: true
+  session_timeout_minutes: 30
+  refresh_token_days: 7
+  rate_limiting: true
+  csrf_protection: true
+
+# Data validation rules
+validation:
+  email_formats: ["standard", "international"]
+  max_batch_size: 1000
+  max_file_size_mb: 10
+  allowed_file_types: ["csv", "xlsx", "json"]
+
+# Performance settings
+performance:
+  api_timeout_seconds: 30
+  connection_pool_size: 20
+  max_concurrent_requests: 100
+  cache_ttl_seconds: 300
+
+# Monitoring and logging
+monitoring:
+  health_check_interval: 60
+  metrics_collection: true
+  error_reporting: true
+  performance_tracking: true
+
+# Development tools
+development:
+  mock_data_enabled: true
+  api_documentation: true
+  debug_logging: true
+  hot_reload: true

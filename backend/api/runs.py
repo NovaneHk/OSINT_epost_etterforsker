@@ -1,540 +1,802 @@
 """
-Runs API Endpoints
-CRUD operations for search runs and OSINT operations
+OSINT E-post Etterforsker - Search Runs API Endpoints
+OSINT search run management and execution endpoints
 """
 
-from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Query, Depends
-import logging
-import json
+from typing import Annotated, List, Optional
+from datetime import datetime
 import asyncio
-from datetime import datetime, timedelta
-from enum import Enum
 
-from backend.core.database import db_manager, create_tables
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
+from pydantic import BaseModel
 
-router = APIRouter()
-logger = logging.getLogger(__name__)
-
-
-class RunStatus(str, Enum):
-    """Run status enumeration"""
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-class Run:
-    """Run data model"""
-    def __init__(self, name: str, **kwargs):
-        self.name = name
-        self.type = kwargs.get('type', 'manual')
-        self.status = kwargs.get('status', RunStatus.PENDING)
-        self.sources = kwargs.get('sources', '[]')
-        self.search_terms = kwargs.get('search_terms', '{}')
-        self.filters = kwargs.get('filters', '{}')
-        self.leads_found = kwargs.get('leads_found', 0)
-        self.progress = float(kwargs.get('progress', 0.0))
-        self.error_message = kwargs.get('error_message')
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "name": self.name,
-            "type": self.type,
-            "status": self.status,
-            "sources": self.sources,
-            "search_terms": self.search_terms,
-            "filters": self.filters,
-            "leads_found": self.leads_found,
-            "progress": self.progress,
-            "error_message": self.error_message
-        }
+from backend.core.dependencies import (
+    DatabaseSession,
+    CommonQuery,
+    PermissionDeps
+)
+from backend.models.search_run import (
+    SearchRun,
+    SearchRunCreate,
+    SearchRunUpdate,
+    SearchRunResponse,
+    SearchRunListResponse,
+    SearchRunType,
+    SearchRunStatus
+)
+from backend.repositories.search_run import SearchRunRepository
 
 
-@router.get("/", response_model=List[Dict[str, Any]])
-async def get_runs(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=1000),
-    status: Optional[str] = Query(None),
-    type: Optional[str] = Query(None)
+router = APIRouter(prefix="/runs", tags=["Search Runs"])
+
+
+class RunStartRequest(BaseModel):
+    """Schema for starting a search run"""
+    sources: Optional[List[str]] = None
+    search_terms: Optional[dict] = None
+    filters: Optional[dict] = None
+
+
+class RunProgressUpdate(BaseModel):
+    """Schema for updating run progress"""
+    progress: float
+    status: Optional[SearchRunStatus] = None
+    message: Optional[str] = None
+
+
+class BulkRunOperation(BaseModel):
+    """Schema for bulk operations on runs"""
+    run_ids: List[str]
+    operation: str
+
+
+@router.get(
+    "",
+    response_model=SearchRunListResponse,
+    summary="List search runs",
+    description="Get paginated list of OSINT search runs with optional filtering"
+)
+async def list_runs(
+    db: DatabaseSession,
+    common: CommonQuery,
+    current_user: PermissionDeps.ReadRuns,
+    run_type: Optional[SearchRunType] = Query(None, description="Filter by run type"),
+    status: Optional[SearchRunStatus] = Query(None, description="Filter by run status"),
+    created_by: Optional[str] = Query(None, description="Filter by creator")
 ):
-    """Get runs with pagination and filtering"""
+    """
+    List OSINT search runs with pagination and filtering.
+    Supports filtering by type, status, and creator.
+    """
+    run_repo = SearchRunRepository(db)
 
-    try:
-        # Ensure database tables exist
-        await create_tables()
+    # Build filters
+    filters = {}
+    if run_type:
+        filters["run_type"] = run_type.value
+    if status:
+        filters["status"] = status.value
+    if created_by:
+        filters["created_by"] = created_by
 
-        # Build query
-        query = "SELECT * FROM runs"
-        params = []
-        conditions = []
+    # Get paginated results
+    result = await run_repo.get_paginated(
+        page=common.pagination["page"],
+        size=common.pagination["size"],
+        filters=filters,
+        order_by=common.search["sort"],
+        order_direction=common.search["order"]
+    )
 
-        if status:
-            conditions.append("status = ?")
-            params.append(status)
-
-        if type:
-            conditions.append("type = ?")
-            params.append(type)
-
-        if conditions:
-            query += " WHERE " + " AND ".join(conditions)
-
-        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-        params.extend([limit, skip])
-
-        # Execute query
-        results = db_manager.execute_query(query, tuple(params))
-
-        logger.info(f"Retrieved {len(results)} runs")
-        return results
-
-    except Exception as e:
-        logger.error(f"Error getting runs: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    return SearchRunListResponse(
+        runs=[SearchRunResponse.from_orm(run) for run in result["records"]],
+        total=result["total"],
+        page=result["page"],
+        size=result["size"],
+        pages=result["pages"]
+    )
 
 
-@router.post("/", response_model=Dict[str, Any])
-async def create_run(run_data: Dict[str, Any]):
-    """Create a new search run"""
+@router.get(
+    "/statistics",
+    summary="Get run statistics",
+    description="Get comprehensive search run statistics and metrics"
+)
+async def get_run_statistics(
+    db: DatabaseSession,
+    current_user: PermissionDeps.ReadRuns
+):
+    """
+    Get comprehensive search run statistics including success rates, performance metrics, and trends.
+    """
+    run_repo = SearchRunRepository(db)
+    return await run_repo.get_run_statistics()
 
-    try:
-        # Validate required fields
-        if not run_data.get("name"):
-            raise HTTPException(status_code=400, detail="Name is required")
 
-        # Ensure database tables exist
-        await create_tables()
+@router.get(
+    "/recent",
+    response_model=SearchRunListResponse,
+    summary="Get recent runs",
+    description="Get recently created or executed search runs"
+)
+async def get_recent_runs(
+    db: DatabaseSession,
+    limit: int = Query(10, ge=1, le=50, description="Number of recent runs to return"),
+    current_user: PermissionDeps.ReadRuns = Depends()
+):
+    """
+    Get recently created or executed search runs for quick access.
+    """
+    run_repo = SearchRunRepository(db)
+    runs = await run_repo.get_recent_runs(limit=limit)
 
-        # Create run object
-        run = Run(name=run_data["name"], **run_data)
+    return SearchRunListResponse(
+        runs=[SearchRunResponse.from_orm(run) for run in runs],
+        total=len(runs),
+        page=1,
+        size=limit,
+        pages=1
+    )
 
-        # Serialize complex fields if they're dicts/lists
-        sources = run.sources
-        if isinstance(sources, list):
-            sources = json.dumps(sources)
 
-        search_terms = run.search_terms
-        if isinstance(search_terms, dict):
-            search_terms = json.dumps(search_terms)
+@router.get(
+    "/active",
+    response_model=SearchRunListResponse,
+    summary="Get active runs",
+    description="Get currently running or pending search runs"
+)
+async def get_active_runs(
+    db: DatabaseSession,
+    current_user: PermissionDeps.ReadRuns
+):
+    """
+    Get currently running or pending search runs for monitoring.
+    """
+    run_repo = SearchRunRepository(db)
+    runs = await run_repo.get_active_runs()
 
-        filters = run.filters
-        if isinstance(filters, dict):
-            filters = json.dumps(filters)
+    return SearchRunListResponse(
+        runs=[SearchRunResponse.from_orm(run) for run in runs],
+        total=len(runs),
+        page=1,
+        size=len(runs),
+        pages=1
+    )
 
-        # Insert into database
-        query = """
-        INSERT INTO runs (
-            name, type, status, sources, search_terms, filters,
-            leads_found, progress, error_message
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
 
-        run_id = db_manager.execute_insert(
-            query,
-            (run.name, run.type, run.status, sources, search_terms,
-             filters, run.leads_found, run.progress, run.error_message)
+@router.post(
+    "",
+    response_model=SearchRunResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create search run",
+    description="Create a new OSINT search run"
+)
+async def create_run(
+    run_data: SearchRunCreate,
+    background_tasks: BackgroundTasks,
+    db: DatabaseSession,
+    current_user: PermissionDeps.CreateRuns
+):
+    """
+    Create a new OSINT search run.
+    Run will be queued for execution.
+    """
+    run_repo = SearchRunRepository(db)
+
+    # Check if run name already exists for user
+    if await run_repo.name_exists_for_user(run_data.name, current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Search run with this name already exists for your account"
         )
 
-        result = run.to_dict()
-        result["id"] = run_id
+    # Set creator
+    run_data_dict = run_data.dict()
+    run_data_dict["created_by"] = current_user.id
 
-        logger.info(f"Created run: {run.name}")
-        return result
-
-    except Exception as e:
-        logger.error(f"Error creating run: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    run = await run_repo.create(SearchRunCreate(**run_data_dict))
+    return SearchRunResponse.from_orm(run)
 
 
-@router.get("/stats", response_model=Dict[str, Any])
-async def get_run_stats():
-    """Get run statistics"""
+@router.get(
+    "/{run_id}",
+    response_model=SearchRunResponse,
+    summary="Get search run",
+    description="Get search run by ID with detailed information"
+)
+async def get_run(
+    run_id: str,
+    db: DatabaseSession,
+    current_user: PermissionDeps.ReadRuns
+):
+    """
+    Get detailed search run information by ID.
+    """
+    run_repo = SearchRunRepository(db)
+    run = await run_repo.get_detailed(run_id)
+
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Search run not found"
+        )
+
+    # Check ownership or admin permission
+    if run.created_by != current_user.id and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
+    return SearchRunResponse.from_orm(run)
+
+
+@router.put(
+    "/{run_id}",
+    response_model=SearchRunResponse,
+    summary="Update search run",
+    description="Update search run information"
+)
+async def update_run(
+    run_id: str,
+    run_update: SearchRunUpdate,
+    db: DatabaseSession,
+    current_user: PermissionDeps.UpdateRuns
+):
+    """
+    Update search run information.
+    Only pending runs can be updated.
+    """
+    run_repo = SearchRunRepository(db)
+    run = await run_repo.get_by_id(run_id)
+
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Search run not found"
+        )
+
+    # Check ownership or admin permission
+    if run.created_by != current_user.id and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
+    # Only allow updates for pending runs
+    if run.status not in [SearchRunStatus.PENDING, SearchRunStatus.FAILED]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only pending or failed runs can be updated"
+        )
+
+    # Check name uniqueness if being updated
+    update_data = run_update.dict(exclude_unset=True)
+    if "name" in update_data:
+        if await run_repo.name_exists_for_user(
+            update_data["name"],
+            current_user.id,
+            exclude_id=run_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Search run with this name already exists for your account"
+            )
+
+    updated_run = await run_repo.update(run, update_data)
+    return SearchRunResponse.from_orm(updated_run)
+
+
+@router.delete(
+    "/{run_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete search run",
+    description="Delete search run and associated data"
+)
+async def delete_run(
+    run_id: str,
+    db: DatabaseSession,
+    current_user: PermissionDeps.DeleteRuns
+):
+    """
+    Delete search run and associated data.
+    Cannot delete running runs.
+    """
+    run_repo = SearchRunRepository(db)
+    run = await run_repo.get_by_id(run_id)
+
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Search run not found"
+        )
+
+    # Check ownership or admin permission
+    if run.created_by != current_user.id and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
+    # Cannot delete running runs
+    if run.status == SearchRunStatus.RUNNING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete a running search run. Stop it first."
+        )
+
+    await run_repo.delete(run_id)
+
+
+@router.post(
+    "/{run_id}/start",
+    response_model=SearchRunResponse,
+    summary="Start search run",
+    description="Start execution of a pending search run"
+)
+async def start_run(
+    run_id: str,
+    start_request: RunStartRequest,
+    background_tasks: BackgroundTasks,
+    db: DatabaseSession,
+    current_user: PermissionDeps.UpdateRuns
+):
+    """
+    Start execution of a pending search run.
+    """
+    run_repo = SearchRunRepository(db)
+    run = await run_repo.get_by_id(run_id)
+
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Search run not found"
+        )
+
+    # Check ownership or admin permission
+    if run.created_by != current_user.id and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
+    # Check if run can be started
+    if run.status != SearchRunStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only pending runs can be started"
+        )
+
+    # Update run configuration if provided
+    if start_request.sources or start_request.search_terms or start_request.filters:
+        update_data = {}
+        if start_request.sources:
+            update_data["sources"] = start_request.sources
+        if start_request.search_terms:
+            update_data["search_terms"] = start_request.search_terms
+        if start_request.filters:
+            update_data["filters"] = start_request.filters
+
+        await run_repo.update(run, update_data)
+
+    # Start the run
+    await run_repo.start_run(run_id)
+
+    # Schedule background processing
+    background_tasks.add_task(process_run_background, run_id, db)
+
+    updated_run = await run_repo.get_by_id(run_id)
+    return SearchRunResponse.from_orm(updated_run)
+
+
+@router.post(
+    "/{run_id}/stop",
+    response_model=SearchRunResponse,
+    summary="Stop search run",
+    description="Stop execution of a running search run"
+)
+async def stop_run(
+    run_id: str,
+    db: DatabaseSession,
+    current_user: PermissionDeps.UpdateRuns
+):
+    """
+    Stop execution of a running search run.
+    """
+    run_repo = SearchRunRepository(db)
+    run = await run_repo.get_by_id(run_id)
+
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Search run not found"
+        )
+
+    # Check ownership or admin permission
+    if run.created_by != current_user.id and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
+    # Check if run can be stopped
+    if run.status != SearchRunStatus.RUNNING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only running runs can be stopped"
+        )
+
+    # Stop the run
+    await run_repo.stop_run(run_id)
+
+    updated_run = await run_repo.get_by_id(run_id)
+    return SearchRunResponse.from_orm(updated_run)
+
+
+@router.post(
+    "/{run_id}/pause",
+    response_model=SearchRunResponse,
+    summary="Pause search run",
+    description="Pause execution of a running search run"
+)
+async def pause_run(
+    run_id: str,
+    db: DatabaseSession,
+    current_user: PermissionDeps.UpdateRuns
+):
+    """
+    Pause execution of a running search run.
+    """
+    run_repo = SearchRunRepository(db)
+    run = await run_repo.get_by_id(run_id)
+
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Search run not found"
+        )
+
+    # Check ownership or admin permission
+    if run.created_by != current_user.id and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
+    # Check if run can be paused
+    if run.status != SearchRunStatus.RUNNING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only running runs can be paused"
+        )
+
+    # Pause the run
+    await run_repo.pause_run(run_id)
+
+    updated_run = await run_repo.get_by_id(run_id)
+    return SearchRunResponse.from_orm(updated_run)
+
+
+@router.post(
+    "/{run_id}/resume",
+    response_model=SearchRunResponse,
+    summary="Resume search run",
+    description="Resume execution of a paused search run"
+)
+async def resume_run(
+    run_id: str,
+    background_tasks: BackgroundTasks,
+    db: DatabaseSession,
+    current_user: PermissionDeps.UpdateRuns
+):
+    """
+    Resume execution of a paused search run.
+    """
+    run_repo = SearchRunRepository(db)
+    run = await run_repo.get_by_id(run_id)
+
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Search run not found"
+        )
+
+    # Check ownership or admin permission
+    if run.created_by != current_user.id and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
+    # Check if run can be resumed
+    if run.status != SearchRunStatus.PAUSED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only paused runs can be resumed"
+        )
+
+    # Resume the run
+    await run_repo.resume_run(run_id)
+
+    # Schedule background processing to continue
+    background_tasks.add_task(process_run_background, run_id, db)
+
+    updated_run = await run_repo.get_by_id(run_id)
+    return SearchRunResponse.from_orm(updated_run)
+
+
+@router.get(
+    "/{run_id}/results",
+    summary="Get search run results",
+    description="Get results and leads found by the search run"
+)
+async def get_run_results(
+    run_id: str,
+    db: DatabaseSession,
+    current_user: PermissionDeps.ReadRuns,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size")
+):
+    """
+    Get results and leads found by the search run.
+    """
+    run_repo = SearchRunRepository(db)
+    run = await run_repo.get_by_id(run_id)
+
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Search run not found"
+        )
+
+    # Check ownership or admin permission
+    if run.created_by != current_user.id and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
+    # Get run results
+    results = await run_repo.get_run_results(run_id, page=page, size=size)
+
+    return results
+
+
+@router.get(
+    "/{run_id}/progress",
+    summary="Get search run progress",
+    description="Get current progress and status of the search run"
+)
+async def get_run_progress(
+    run_id: str,
+    db: DatabaseSession,
+    current_user: PermissionDeps.ReadRuns
+):
+    """
+    Get current progress and status of the search run.
+    """
+    run_repo = SearchRunRepository(db)
+    run = await run_repo.get_by_id(run_id)
+
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Search run not found"
+        )
+
+    # Check ownership or admin permission
+    if run.created_by != current_user.id and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
+    progress_data = await run_repo.get_run_progress(run_id)
+
+    return {
+        "run_id": run_id,
+        "status": run.status.value,
+        "progress": run.progress,
+        "current_step": progress_data.get("current_step"),
+        "total_steps": progress_data.get("total_steps"),
+        "message": progress_data.get("message"),
+        "leads_found": run.leads_found,
+        "sources_processed": progress_data.get("sources_processed", 0),
+        "estimated_completion": progress_data.get("estimated_completion")
+    }
+
+
+@router.get(
+    "/status/{status}",
+    response_model=SearchRunListResponse,
+    summary="Get runs by status",
+    description="Get search runs filtered by specific status"
+)
+async def get_runs_by_status(
+    status: SearchRunStatus,
+    db: DatabaseSession,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    current_user: PermissionDeps.ReadRuns = Depends()
+):
+    """
+    Get search runs filtered by specific status.
+    """
+    run_repo = SearchRunRepository(db)
+
+    skip = (page - 1) * size
+    runs = await run_repo.get_by_status(status, skip=skip, limit=size)
+    total = await run_repo.count(filters={"status": status.value})
+
+    return SearchRunListResponse(
+        runs=[SearchRunResponse.from_orm(run) for run in runs],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1) // size
+    )
+
+
+@router.get(
+    "/type/{run_type}",
+    response_model=SearchRunListResponse,
+    summary="Get runs by type",
+    description="Get search runs filtered by specific type"
+)
+async def get_runs_by_type(
+    run_type: SearchRunType,
+    db: DatabaseSession,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    current_user: PermissionDeps.ReadRuns = Depends()
+):
+    """
+    Get search runs filtered by specific type.
+    """
+    run_repo = SearchRunRepository(db)
+
+    skip = (page - 1) * size
+    runs = await run_repo.get_by_type(run_type, skip=skip, limit=size)
+    total = await run_repo.count(filters={"run_type": run_type.value})
+
+    return SearchRunListResponse(
+        runs=[SearchRunResponse.from_orm(run) for run in runs],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1) // size
+    )
+
+
+@router.get(
+    "/user/{user_id}",
+    response_model=SearchRunListResponse,
+    summary="Get user runs",
+    description="Get search runs created by a specific user"
+)
+async def get_user_runs(
+    user_id: str,
+    db: DatabaseSession,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    current_user: PermissionDeps.ReadRuns = Depends()
+):
+    """
+    Get search runs created by a specific user.
+    Users can only see their own runs unless they have admin privileges.
+    """
+    # Check permission to view other user's runs
+    if user_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+
+    run_repo = SearchRunRepository(db)
+
+    skip = (page - 1) * size
+    runs = await run_repo.get_by_user(user_id, skip=skip, limit=size)
+    total = await run_repo.count(filters={"created_by": user_id})
+
+    return SearchRunListResponse(
+        runs=[SearchRunResponse.from_orm(run) for run in runs],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1) // size
+    )
+
+
+@router.post(
+    "/bulk-operations",
+    summary="Perform bulk operations on runs",
+    description="Perform bulk operations like stopping, deleting, or updating multiple runs"
+)
+async def bulk_run_operations(
+    operation_data: BulkRunOperation,
+    db: DatabaseSession,
+    current_user: PermissionDeps.UpdateRuns
+):
+    """
+    Perform bulk operations on multiple search runs.
+    Supported operations: stop, delete, cancel
+    """
+    run_repo = SearchRunRepository(db)
+
+    if operation_data.operation == "stop":
+        count = 0
+        for run_id in operation_data.run_ids:
+            run = await run_repo.get_by_id(run_id)
+            if run and (run.created_by == current_user.id or current_user.is_admin):
+                if run.status == SearchRunStatus.RUNNING:
+                    await run_repo.stop_run(run_id)
+                    count += 1
+        return {"message": f"Stopped {count} runs"}
+
+    elif operation_data.operation == "delete":
+        count = 0
+        for run_id in operation_data.run_ids:
+            run = await run_repo.get_by_id(run_id)
+            if run and (run.created_by == current_user.id or current_user.is_admin):
+                if run.status != SearchRunStatus.RUNNING:
+                    if await run_repo.delete(run_id):
+                        count += 1
+        return {"message": f"Deleted {count} runs"}
+
+    elif operation_data.operation == "cancel":
+        count = 0
+        for run_id in operation_data.run_ids:
+            run = await run_repo.get_by_id(run_id)
+            if run and (run.created_by == current_user.id or current_user.is_admin):
+                if run.status in [SearchRunStatus.PENDING, SearchRunStatus.RUNNING, SearchRunStatus.PAUSED]:
+                    await run_repo.update_status(run_id, SearchRunStatus.CANCELLED)
+                    count += 1
+        return {"message": f"Cancelled {count} runs"}
+
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported operation: {operation_data.operation}"
+        )
+
+
+# Background task functions
+async def process_run_background(run_id: str, db):
+    """
+    Background task to process search run.
+    """
+    run_repo = SearchRunRepository(db)
 
     try:
-        # Ensure database tables exist
-        await create_tables()
+        # Get run details
+        run = await run_repo.get_by_id(run_id)
+        if not run:
+            return
 
-        # Get total count
-        total_query = "SELECT COUNT(*) as count FROM runs"
-        total_result = db_manager.execute_query(total_query)
-        total_runs = total_result[0]["count"] if total_result else 0
+        # Update status to running if not already
+        if run.status != SearchRunStatus.RUNNING:
+            await run_repo.update_status(run_id, SearchRunStatus.RUNNING)
 
-        # Get status breakdown
-        status_query = """
-        SELECT status, COUNT(*) as count
-        FROM runs
-        GROUP BY status
-        """
-        status_results = db_manager.execute_query(status_query)
-        status_breakdown = {row["status"]: row["count"] for row in status_results}
+        # Simulate processing steps
+        steps = ["Initializing", "Loading sources", "Searching", "Processing results", "Finalizing"]
+        total_steps = len(steps)
 
-        # Get type breakdown
-        type_query = """
-        SELECT type, COUNT(*) as count
-        FROM runs
-        GROUP BY type
-        """
-        type_results = db_manager.execute_query(type_query)
-        type_breakdown = {row["type"]: row["count"] for row in type_results}
-
-        # Get success rate
-        success_query = """
-        SELECT
-            (CAST(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS FLOAT) / COUNT(*)) * 100 as success_rate
-        FROM runs
-        WHERE status IN ('completed', 'failed')
-        """
-        success_result = db_manager.execute_query(success_query)
-        success_rate = success_result[0]["success_rate"] if success_result else 0
-
-        # Get total leads found
-        leads_query = "SELECT SUM(leads_found) as total_leads FROM runs WHERE status = 'completed'"
-        leads_result = db_manager.execute_query(leads_query)
-        total_leads = leads_result[0]["total_leads"] if leads_result else 0
-
-        # Get recent runs (last 7 days)
-        recent_query = """
-        SELECT COUNT(*) as count
-        FROM runs
-        WHERE created_at >= datetime('now', '-7 days')
-        """
-        recent_result = db_manager.execute_query(recent_query)
-        recent_runs = recent_result[0]["count"] if recent_result else 0
-
-        # Get average run duration for completed runs
-        duration_query = """
-        SELECT AVG(
-            JULIANDAY(completed_at) - JULIANDAY(started_at)
-        ) * 24 * 60 as avg_duration_minutes
-        FROM runs
-        WHERE status = 'completed' AND started_at IS NOT NULL AND completed_at IS NOT NULL
-        """
-        duration_result = db_manager.execute_query(duration_query)
-        avg_duration = duration_result[0]["avg_duration_minutes"] if duration_result else 0
-
-        stats = {
-            "total_runs": total_runs,
-            "pending_runs": status_breakdown.get("pending", 0),
-            "running_runs": status_breakdown.get("running", 0),
-            "completed_runs": status_breakdown.get("completed", 0),
-            "failed_runs": status_breakdown.get("failed", 0),
-            "success_rate_percent": round(success_rate or 0, 1),
-            "total_leads_found": total_leads or 0,
-            "recent_runs_7d": recent_runs,
-            "avg_duration_minutes": round(avg_duration or 0, 1),
-            "status_breakdown": status_breakdown,
-            "type_breakdown": type_breakdown
-        }
-
-        logger.info(f"Generated run stats: {stats}")
-        return stats
-
-    except Exception as e:
-        logger.error(f"Error getting run stats: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-
-@router.get("/{run_id}", response_model=Dict[str, Any])
-async def get_run(run_id: int):
-    """Get a specific run by ID"""
-
-    try:
-        query = "SELECT * FROM runs WHERE id = ?"
-        results = db_manager.execute_query(query, (run_id,))
-
-        if not results:
-            raise HTTPException(status_code=404, detail="Run not found")
-
-        return results[0]
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting run {run_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-
-@router.post("/{run_id}/start")
-async def start_run(run_id: int):
-    """Start a search run"""
-
-    try:
-        # Check if run exists
-        existing = db_manager.execute_query("SELECT * FROM runs WHERE id = ?", (run_id,))
-        if not existing:
-            raise HTTPException(status_code=404, detail="Run not found")
-
-        run = existing[0]
-
-        if run["status"] != "pending":
-            raise HTTPException(status_code=400, detail="Run is not in pending status")
-
-        # Update run status to running
-        update_query = """
-        UPDATE runs
-        SET status = 'running', started_at = CURRENT_TIMESTAMP, progress = 0.0
-        WHERE id = ?
-        """
-        db_manager.execute_insert(update_query, (run_id,))
-
-        # Start background processing (mock implementation)
-        asyncio.create_task(_process_run(run_id))
-
-        logger.info(f"Started run {run_id}")
-        return {
-            "message": "Run started successfully",
-            "run_id": run_id,
-            "status": "running"
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error starting run {run_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
-
-
-@router.post("/{run_id}/stop")
-async def stop_run(run_id: int):
-    """Stop a running search run"""
-
-    try:
-        # Check if run exists
-        existing = db_manager.execute_query("SELECT * FROM runs WHERE id = ?", (run_id,))
-        if not existing:
-            raise HTTPException(status_code=404, detail="Run not found")
-
-        run = existing[0]
-
-        if run["status"] != "running":
-            raise HTTPException(status_code=400, detail="Run is not currently running")
-
-        # Update run status to cancelled
-        update_query = """
-        UPDATE runs
-        SET status = 'cancelled', completed_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-        """
-        db_manager.execute_insert(update_query, (run_id,))
-
-        logger.info(f"Stopped run {run_id}")
-        return {
-            "message": "Run stopped successfully",
-            "run_id": run_id,
-            "status": "cancelled"
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error stopping run {run_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
-
-
-@router.get("/{run_id}/results")
-async def get_run_results(run_id: int):
-    """Get results for a completed run"""
-
-    try:
-        # Check if run exists
-        run_query = "SELECT * FROM runs WHERE id = ?"
-        run_results = db_manager.execute_query(run_query, (run_id,))
-
-        if not run_results:
-            raise HTTPException(status_code=404, detail="Run not found")
-
-        run = run_results[0]
-
-        # Get leads associated with this run
-        leads_query = """
-        SELECT * FROM leads
-        WHERE run_id = ?
-        ORDER BY confidence_score DESC, created_at DESC
-        """
-        leads = db_manager.execute_query(leads_query, (run_id,))
-
-        # Get sources used in this run
-        sources_data = json.loads(run.get("sources", "[]"))
-
-        # Build comprehensive results
-        results = {
-            "run_info": run,
-            "leads_found": leads,
-            "leads_count": len(leads),
-            "sources_used": sources_data,
-            "summary": {
-                "total_leads": len(leads),
-                "high_confidence": len([l for l in leads if l.get("confidence_score", 0) >= 80]),
-                "verified_emails": len([l for l in leads if l.get("verification_status") == "verified"]),
-                "unique_companies": len(set([l.get("company") for l in leads if l.get("company")])),
-                "avg_confidence": round(sum([l.get("confidence_score", 0) for l in leads]) / max(len(leads), 1), 1)
-            }
-        }
-
-        logger.info(f"Retrieved results for run {run_id}")
-        return results
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting run results {run_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-
-@router.delete("/{run_id}")
-async def delete_run(run_id: int):
-    """Delete a specific run"""
-
-    try:
-        # Check if run exists
-        existing = db_manager.execute_query("SELECT * FROM runs WHERE id = ?", (run_id,))
-        if not existing:
-            raise HTTPException(status_code=404, detail="Run not found")
-
-        run = existing[0]
-
-        if run["status"] == "running":
-            raise HTTPException(status_code=400, detail="Cannot delete a running process")
-
-        # Delete associated leads first (cascade)
-        leads_query = "DELETE FROM leads WHERE run_id = ?"
-        db_manager.execute_insert(leads_query, (run_id,))
-
-        # Delete run
-        run_query = "DELETE FROM runs WHERE id = ?"
-        db_manager.execute_insert(run_query, (run_id,))
-
-        logger.info(f"Deleted run {run_id}")
-        return {"message": "Run deleted successfully"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting run {run_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-
-async def _process_run(run_id: int):
-    """Background task to process a search run (mock implementation)"""
-
-    try:
-        logger.info(f"Processing run {run_id}")
-
-        # Simulate processing with progress updates
-        for progress in [25, 50, 75, 100]:
-            await asyncio.sleep(2)  # Simulate work
+        for i, step in enumerate(steps):
+            # Check if run was cancelled
+            current_run = await run_repo.get_by_id(run_id)
+            if current_run.status in [SearchRunStatus.CANCELLED, SearchRunStatus.STOPPED]:
+                return
 
             # Update progress
-            progress_query = """
-            UPDATE runs
-            SET progress = ?
-            WHERE id = ?
-            """
-            db_manager.execute_insert(progress_query, (float(progress), run_id))
+            progress = ((i + 1) / total_steps) * 100
+            await run_repo.update_progress(run_id, progress, step)
 
-            # Simulate finding leads
-            if progress == 100:
-                # Get run details
-                run_query = "SELECT * FROM runs WHERE id = ?"
-                run_results = db_manager.execute_query(run_query, (run_id,))
+            # Simulate work
+            await asyncio.sleep(2)
 
-                if run_results:
-                    run = run_results[0]
-
-                    # Generate mock leads for this run
-                    mock_leads = _generate_mock_leads(run_id, run)
-                    leads_found = len(mock_leads)
-
-                    # Mark run as completed
-                    complete_query = """
-                    UPDATE runs
-                    SET status = 'completed', completed_at = CURRENT_TIMESTAMP,
-                        leads_found = ?, progress = 100.0
-                    WHERE id = ?
-                    """
-                    db_manager.execute_insert(complete_query, (leads_found, run_id))
-
-                    logger.info(f"Completed run {run_id} with {leads_found} leads")
+        # Complete the run
+        await run_repo.complete_run(run_id, leads_found=15)  # Mock leads count
 
     except Exception as e:
-        # Mark run as failed
-        error_query = """
-        UPDATE runs
-        SET status = 'failed', completed_at = CURRENT_TIMESTAMP,
-            error_message = ?, progress = 0.0
-        WHERE id = ?
-        """
-        db_manager.execute_insert(error_query, (str(e), run_id))
-        logger.error(f"Run {run_id} failed: {e}")
-
-
-def _generate_mock_leads(run_id: int, run_data: Dict) -> List[Dict]:
-    """Generate mock leads for a run"""
-
-    mock_leads = [
-        {
-            "email": "john.doe@techcorp.com",
-            "name": "John Doe",
-            "company": "TechCorp Inc.",
-            "job_title": "Software Engineer",
-            "phone": "+1-555-0123",
-            "linkedin_url": "https://linkedin.com/in/johndoe",
-            "website": "https://techcorp.com",
-            "location": "San Francisco, CA",
-            "industry": "Technology",
-            "confidence_score": 85.5,
-            "verification_status": "verified",
-            "run_id": run_id
-        },
-        {
-            "email": "jane.smith@innovate.io",
-            "name": "Jane Smith",
-            "company": "Innovate Solutions",
-            "job_title": "Product Manager",
-            "phone": "+1-555-0124",
-            "linkedin_url": "https://linkedin.com/in/janesmith",
-            "website": "https://innovate.io",
-            "location": "New York, NY",
-            "industry": "Technology",
-            "confidence_score": 92.1,
-            "verification_status": "verified",
-            "run_id": run_id
-        },
-        {
-            "email": "mike.johnson@startup.co",
-            "name": "Mike Johnson",
-            "company": "StartupCo",
-            "job_title": "CTO",
-            "phone": "+1-555-0125",
-            "linkedin_url": "https://linkedin.com/in/mikejohnson",
-            "website": "https://startup.co",
-            "location": "Austin, TX",
-            "industry": "Technology",
-            "confidence_score": 78.3,
-            "verification_status": "pending",
-            "run_id": run_id
-        }
-    ]
-
-    # Insert mock leads into database
-    for lead in mock_leads:
-        lead_query = """
-        INSERT INTO leads (
-            email, name, company, job_title, phone, linkedin_url,
-            website, location, industry, confidence_score,
-            verification_status, run_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-
-        db_manager.execute_insert(
-            lead_query,
-            (lead["email"], lead["name"], lead["company"], lead["job_title"],
-             lead["phone"], lead["linkedin_url"], lead["website"], lead["location"],
-             lead["industry"], lead["confidence_score"], lead["verification_status"],
-             lead["run_id"])
-        )
-
-    return mock_leads
+        # Mark as failed
+        await run_repo.fail_run(run_id, str(e))

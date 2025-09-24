@@ -35,6 +35,14 @@ class UserStatus(str, Enum):
 
 
 class User(BaseEntity, MetadataMixin):
+    baseentity_id: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        nullable=True,
+        index=True,
+        comment="ForeignKey to baseentitys.id",
+    )
+    # Hvis du bruker UUID som id i BaseEntity, bruk UUID og ForeignKey:
+    # baseentity_id: Mapped[Optional[str]] = mapped_column(UUID(as_uuid=False), ForeignKey('baseentitys.id'), nullable=True)
     """User model for authentication and authorization"""
 
     __tablename__ = "users"

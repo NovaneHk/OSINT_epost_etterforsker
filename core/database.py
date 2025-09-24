@@ -546,11 +546,12 @@ class DatabaseManager:
             cursor = conn.cursor()
 
             query = '''
-                SELECT e.*, c.name as company_name, c.domain, c.industry, c.country
+                SELECT e.*, c.name as company_name, c.domain,
+                       c.sector as industry, c.location as country
                 FROM emails e
                 LEFT JOIN companies c ON e.company_id = c.id
-                WHERE e.final_score >= ?
-                ORDER BY e.final_score DESC, e.extracted_at DESC
+                WHERE e.risk_score >= ?
+                ORDER BY e.confidence_score DESC, e.created_at DESC
             '''
 
             if limit:

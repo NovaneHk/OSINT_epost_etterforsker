@@ -1,0 +1,125 @@
+# Daily Intelligence Gathering Workflow
+# Automated daily OSINT collection and analysis
+
+name: "Daily Intelligence Gathering"
+description: "Automated daily OSINT collection and analysis for target domains"
+version: "2.0"
+enabled: true
+schedule: "0 9 * * *"  # 09:00 every day
+
+# Workflow parameters
+parameters:
+  default_query: "example.com"  # Default domain to search
+  max_execution_time: 1800  # 30 minutes
+  priority: "normal"
+
+# Workflow steps
+steps:
+  # Step 1: Email harvesting using theHarvester
+  - name: "harvest_emails"
+    connector: "theharvester"
+    description: "Harvest emails from multiple sources"
+    timeout: 300
+    retry_count: 2
+    critical: true
+    config:
+      sources:
+        - google
+        - bing
+        - linkedin
+        - duckduckgo
+      limit: 200
+      delay: 2
+
+  # Step 2: Check for data breaches
+  - name: "check_breaches"
+    connector: "hibp"
+    description: "Check harvested emails against breach databases"
+    depends_on: ["harvest_emails"]
+    timeout: 180
+    retry_count: 3
+    critical: false
+    config:
+      check_all_emails: true
+      check_pastes: true
+      truncate_response: false
+
+  # Step 3: Enhanced scoring and validation
+  - name: "score_contacts"
+    connector: "internal"
+    module: "enhanced_scorer"
+    description: "Score and validate collected contacts"
+    depends_on: ["harvest_emails", "check_breaches"]
+    timeout: 120
+    config:
+      scoring_algorithm: "enhanced_v2"
+      include_breach_data: true
+      min_confidence: 0.6
+
+  # Step 4: Generate intelligence report
+  - name: "generate_report"
+    connector: "internal"
+    module: "intelligence_reporter"
+    description: "Generate comprehensive intelligence report"
+    depends_on: ["score_contacts"]
+    timeout: 60
+    config:
+      format: ["json", "pdf"]
+      include_metadata: true
+      include_statistics: true
+
+  # Step 5: Export to NovaNexus (if configured)
+  - name: "export_results"
+    connector: "novanexus"
+    description: "Export results to NovaNexus CRM"
+    depends_on: ["score_contacts"]
+    timeout: 120
+    critical: false
+    config:
+      format: "crm_import"
+      campaign_id: "auto_generated"
+      tag_prefix: "daily_intel"
+
+# Notification settings
+notifications:
+  - type: "email"
+    recipients:
+      - "admin@novanexus.com"
+      - "osint-team@novanexus.com"
+    on: ["completion", "error"]
+    template: "daily_intelligence_report"
+
+  - type: "webhook"
+    url: "https://n8n.novanexus.com/webhook/osint-daily"
+    on: ["completion"]
+    include_results: true
+
+  - type: "slack"
+    webhook_url: null  # Configure if using Slack
+    channel: "#osint-alerts"
+    on: ["error", "completion"]
+
+# Success criteria
+success_criteria:
+  min_emails_found: 5
+  max_execution_time: 1800
+  required_steps: ["harvest_emails", "score_contacts"]
+
+# Error handling
+error_handling:
+  continue_on_non_critical_failure: true
+  max_step_failures: 2
+  retry_failed_steps: true
+
+# Data retention
+data_retention:
+  keep_raw_results: true
+  retention_days: 90
+  compress_old_results: true
+
+# Metadata
+metadata:
+  created_by: "OSINT Team"
+  created_date: "2025-09-24"
+  last_modified: "2025-09-24"
+  tags: ["daily", "automated", "intelligence", "email"]

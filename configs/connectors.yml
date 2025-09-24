@@ -1,0 +1,119 @@
+# OSINT Connector Configuration for Phase 2
+# Enhanced integration settings for all OSINT tools
+
+connectors:
+  # theHarvester Enhanced Configuration
+  theharvester:
+    enabled: true
+    timeout: 60
+    max_retries: 3
+    sources:
+      - google
+      - bing
+      - linkedin
+      - duckduckgo
+    limit: 500
+    delay: 2  # Seconds between requests to avoid rate limiting
+    use_shodan: false
+    shodan_api_key: null  # Set if you have Shodan API access
+    tool_path: "theHarvester"  # Path to theHarvester executable
+
+  # Have I Been Pwned Configuration
+  hibp:
+    enabled: true
+    api_key: null  # HIBP API key (required for full access)
+    timeout: 15
+    rate_limit: 1.5  # Seconds between requests
+    max_retries: 3
+    check_pastes: true
+    truncate_response: false
+
+  # SpiderFoot Configuration (requires installation)
+  spiderfoot:
+    enabled: false  # Disabled by default - requires SpiderFoot installation
+    api_url: "http://localhost:5001"
+    api_key: null
+    timeout: 120
+    modules:
+      - sfp_dnsresolve
+      - sfp_subdomains
+      - sfp_emails
+      - sfp_leaks
+    max_threads: 5
+
+  # Recon-ng Configuration (requires installation)
+  reconng:
+    enabled: false  # Disabled by default - requires Recon-ng installation
+    workspace: "default"
+    timeout: 90
+    modules:
+      - recon/contacts/gather/http/api/whois_pocs
+      - recon/profiles-profiles/gather/http/api/twitter
+    api_keys: {}  # Module-specific API keys
+
+  # IntelOwl Configuration (requires setup)
+  intelowl:
+    enabled: false  # Disabled by default - requires IntelOwl setup
+    api_url: "http://localhost:8000"
+    api_key: null
+    timeout: 180
+    analyzers:
+      - email_reputation
+      - domain_analysis
+      - threat_intelligence
+    max_analysis_time: 300
+
+  # Metagoofil Configuration
+  metagoofil:
+    enabled: false  # Disabled by default - requires Metagoofil installation
+    timeout: 120
+    filetypes:
+      - pdf
+      - doc
+      - xls
+      - ppt
+      - docx
+      - xlsx
+      - pptx
+    limit: 50
+    download_files: false  # Security consideration
+
+  # Maltego Export Configuration
+  maltego:
+    enabled: true
+    export_format: "mtgl"
+    include_metadata: true
+    max_entities: 1000
+
+# Global connector settings
+global_settings:
+  max_concurrent_connectors: 5
+  default_timeout: 60
+  retry_delay: 5
+  enable_caching: true
+  cache_ttl: 3600  # 1 hour
+  log_level: "INFO"
+
+# Rate limiting settings
+rate_limiting:
+  enabled: true
+  requests_per_minute: 30
+  burst_limit: 10
+  backoff_factor: 2
+
+# Security settings
+security:
+  validate_ssl: true
+  user_agent: "OSINT-B2B-Email-System/2.0"
+  max_redirects: 5
+  allowed_domains: []  # Empty = allow all
+  blocked_domains:
+    - malware.com
+    - phishing.example
+
+# Output settings
+output:
+  save_raw_results: true
+  results_directory: "data/results"
+  compress_results: true
+  retention_days: 90

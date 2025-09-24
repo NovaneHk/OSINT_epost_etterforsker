@@ -1,361 +1,544 @@
 """
-Campaigns API Endpoints
-CRUD operations for OSINT search campaigns
+OSINT E-post Etterforsker - Campaigns API Endpoints
+Campaign management and lifecycle operations endpoints
 """
 
-from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Query, Depends
-import logging
-import json
+from typing import Annotated, List, Optional
 from datetime import datetime
 
-from backend.core.database import db_manager, create_tables
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 
-router = APIRouter()
-logger = logging.getLogger(__name__)
-
-
-class Campaign:
-    """Campaign data model"""
-    def __init__(self, name: str, **kwargs):
-        self.name = name
-        self.description = kwargs.get('description', '')
-        self.filter_criteria = kwargs.get('filter_criteria', '{}')
-        self.status = kwargs.get('status', 'draft')
-        self.leads_count = int(kwargs.get('leads_count', 0))
-        self.target_count = kwargs.get('target_count')
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "name": self.name,
-            "description": self.description,
-            "filter_criteria": self.filter_criteria,
-            "status": self.status,
-            "leads_count": self.leads_count,
-            "target_count": self.target_count
-        }
+from backend.core.dependencies import (
+    DatabaseSession,
+    CommonQuery,
+    PermissionDeps
+)
+from backend.models.campaign import (
+    Campaign,
+    CampaignCreate,
+    CampaignUpdate,
+    CampaignResponse,
+    CampaignListResponse,
+    CampaignStatus
+)
+from backend.repositories.campaign import CampaignRepository
 
 
-@router.get("/", response_model=List[Dict[str, Any]])
-async def get_campaigns(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=1000),
-    status: Optional[str] = Query(None),
-    search: Optional[str] = Query(None)
+router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
+
+
+class CampaignStatusUpdate(BaseModel):
+    """Schema for campaign status updates"""
+    status: CampaignStatus
+
+
+class BulkCampaignOperation(BaseModel):
+    """Schema for bulk operations on campaigns"""
+    campaign_ids: List[str]
+    operation: str
+    data: Optional[dict] = None
+
+
+@router.get(
+    "",
+    response_model=CampaignListResponse,
+    summary="List campaigns",
+    description="Get paginated list of campaigns with optional filtering"
+)
+async def list_campaigns(
+    db: DatabaseSession,
+    common: CommonQuery,
+    current_user: PermissionDeps.ReadCampaigns,
+    status: Optional[CampaignStatus] = Query(None, description="Filter by campaign status"),
+    created_by: Optional[str] = Query(None, description="Filter by creator"),
+    date_from: Optional[datetime] = Query(None, description="Filter from creation date"),
+    date_to: Optional[datetime] = Query(None, description="Filter to creation date")
 ):
-    """Get campaigns with pagination and filtering"""
+    """
+    List campaigns with pagination and filtering.
+    Supports filtering by status, creator, and date range.
+    """
+    campaign_repo = CampaignRepository(db)
 
-    try:
-        # Ensure database tables exist
-        await create_tables()
+    # Build filters
+    filters = {}
+    if status:
+        filters["status"] = status.value
+    if created_by:
+        filters["created_by"] = created_by
 
-        # Build query
-        query = "SELECT * FROM campaigns"
-        params = []
-        conditions = []
+    # Handle date range filtering
+    if date_from or date_to:
+        date_filter = {}
+        if date_from:
+            date_filter["gte"] = date_from
+        if date_to:
+            date_filter["lte"] = date_to
+        filters["created_at"] = date_filter
 
-        if status:
-            conditions.append("status = ?")
-            params.append(status)
+    # Get paginated results
+    result = await campaign_repo.get_paginated(
+        page=common.pagination["page"],
+        size=common.pagination["size"],
+        filters=filters,
+        order_by=common.search["sort"],
+        order_direction=common.search["order"]
+    )
 
-        if search:
-            conditions.append("(name LIKE ? OR description LIKE ?)")
-            search_param = f"%{search}%"
-            params.extend([search_param, search_param])
-
-        if conditions:
-            query += " WHERE " + " AND ".join(conditions)
-
-        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-        params.extend([limit, skip])
-
-        # Execute query
-        results = db_manager.execute_query(query, tuple(params))
-
-        logger.info(f"Retrieved {len(results)} campaigns")
-        return results
-
-    except Exception as e:
-        logger.error(f"Error getting campaigns: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    return CampaignListResponse(
+        campaigns=[CampaignResponse.from_orm(campaign) for campaign in result["records"]],
+        total=result["total"],
+        page=result["page"],
+        size=result["size"],
+        pages=result["pages"]
+    )
 
 
-@router.post("/", response_model=Dict[str, Any])
-async def create_campaign(campaign_data: Dict[str, Any]):
-    """Create a new campaign"""
+@router.get(
+    "/search",
+    response_model=CampaignListResponse,
+    summary="Search campaigns",
+    description="Search campaigns by name or description"
+)
+async def search_campaigns(
+    db: DatabaseSession,
+    q: str = Query(..., description="Search query"),
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    current_user: PermissionDeps.ReadCampaigns = Depends()
+):
+    """
+    Search campaigns by name or description.
+    """
+    campaign_repo = CampaignRepository(db)
 
-    try:
-        # Validate required fields
-        if not campaign_data.get("name"):
-            raise HTTPException(status_code=400, detail="Name is required")
+    skip = (page - 1) * size
+    campaigns = await campaign_repo.search_campaigns(q, skip=skip, limit=size)
+    total = len(campaigns)  # Simplified count for demo
 
-        # Ensure database tables exist
-        await create_tables()
+    return CampaignListResponse(
+        campaigns=[CampaignResponse.from_orm(campaign) for campaign in campaigns],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1) // size
+    )
 
-        # Create campaign object
-        campaign = Campaign(name=campaign_data["name"], **campaign_data)
 
-        # Serialize filter_criteria if it's a dict
-        filter_criteria = campaign.filter_criteria
-        if isinstance(filter_criteria, dict):
-            filter_criteria = json.dumps(filter_criteria)
+@router.get(
+    "/statistics",
+    summary="Get campaign statistics",
+    description="Get campaign statistics and metrics"
+)
+async def get_campaign_statistics(
+    db: DatabaseSession,
+    current_user: PermissionDeps.ReadCampaigns
+):
+    """
+    Get comprehensive campaign statistics including counts by status,
+    performance metrics, and user activity.
+    """
+    campaign_repo = CampaignRepository(db)
+    return await campaign_repo.get_campaign_statistics()
 
-        # Insert into database
-        query = """
-        INSERT INTO campaigns (
-            name, description, filter_criteria, status, leads_count, target_count
-        ) VALUES (?, ?, ?, ?, ?, ?)
-        """
 
-        campaign_id = db_manager.execute_insert(
-            query,
-            (campaign.name, campaign.description, filter_criteria,
-             campaign.status, campaign.leads_count, campaign.target_count)
+@router.get(
+    "/by-creator",
+    summary="Get campaigns by creator statistics",
+    description="Get campaign creation statistics by user"
+)
+async def get_campaigns_by_creator_stats(
+    db: DatabaseSession,
+    limit: int = Query(10, ge=1, le=50, description="Number of top creators to return"),
+    current_user: PermissionDeps.ReadCampaigns = Depends()
+):
+    """
+    Get campaign creation statistics by user for analytics.
+    """
+    campaign_repo = CampaignRepository(db)
+    return await campaign_repo.get_campaigns_by_creator_stats(limit=limit)
+
+
+@router.post(
+    "",
+    response_model=CampaignResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create campaign",
+    description="Create a new campaign"
+)
+async def create_campaign(
+    campaign_data: CampaignCreate,
+    db: DatabaseSession,
+    current_user: PermissionDeps.CreateCampaigns
+):
+    """
+    Create a new campaign for organizing OSINT investigations.
+    Campaign name must be unique for the user.
+    """
+    campaign_repo = CampaignRepository(db)
+
+    # Check if campaign name already exists for this user
+    if await campaign_repo.name_exists(campaign_data.name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Campaign with this name already exists"
         )
 
-        result = campaign.to_dict()
-        result["id"] = campaign_id
+    # Set the creator
+    campaign_data_dict = campaign_data.dict()
+    campaign_data_dict["created_by"] = current_user.id
 
-        logger.info(f"Created campaign: {campaign.name}")
-        return result
-
-    except Exception as e:
-        logger.error(f"Error creating campaign: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    campaign = await campaign_repo.create(campaign_data_dict)
+    return CampaignResponse.from_orm(campaign)
 
 
-@router.get("/stats", response_model=Dict[str, Any])
-async def get_campaign_stats():
-    """Get campaign statistics"""
+@router.get(
+    "/{campaign_id}",
+    response_model=CampaignResponse,
+    summary="Get campaign",
+    description="Get campaign by ID with detailed information"
+)
+async def get_campaign(
+    campaign_id: str,
+    db: DatabaseSession,
+    current_user: PermissionDeps.ReadCampaigns
+):
+    """
+    Get detailed campaign information by ID.
+    """
+    campaign_repo = CampaignRepository(db)
+    campaign = await campaign_repo.get_detailed(campaign_id)
 
-    try:
-        # Ensure database tables exist
-        await create_tables()
+    if not campaign:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Campaign not found"
+        )
 
-        # Get total count
-        total_query = "SELECT COUNT(*) as count FROM campaigns"
-        total_result = db_manager.execute_query(total_query)
-        total_campaigns = total_result[0]["count"] if total_result else 0
-
-        # Get status breakdown
-        status_query = """
-        SELECT status, COUNT(*) as count
-        FROM campaigns
-        GROUP BY status
-        """
-        status_results = db_manager.execute_query(status_query)
-        status_breakdown = {row["status"]: row["count"] for row in status_results}
-
-        # Get recent campaigns (last 7 days)
-        recent_query = """
-        SELECT COUNT(*) as count
-        FROM campaigns
-        WHERE created_at >= datetime('now', '-7 days')
-        """
-        recent_result = db_manager.execute_query(recent_query)
-        recent_campaigns = recent_result[0]["count"] if recent_result else 0
-
-        # Calculate total leads found across all campaigns
-        leads_query = "SELECT SUM(leads_count) as total_leads FROM campaigns"
-        leads_result = db_manager.execute_query(leads_query)
-        total_leads = leads_result[0]["total_leads"] if leads_result else 0
-
-        # Get top performing campaigns
-        top_query = """
-        SELECT name, leads_count, status
-        FROM campaigns
-        WHERE leads_count > 0
-        ORDER BY leads_count DESC
-        LIMIT 5
-        """
-        top_results = db_manager.execute_query(top_query)
-
-        stats = {
-            "total_campaigns": total_campaigns,
-            "active_campaigns": status_breakdown.get("active", 0),
-            "draft_campaigns": status_breakdown.get("draft", 0),
-            "completed_campaigns": status_breakdown.get("completed", 0),
-            "recent_campaigns_7d": recent_campaigns,
-            "total_leads_found": total_leads or 0,
-            "status_breakdown": status_breakdown,
-            "top_performing": top_results
-        }
-
-        logger.info(f"Generated campaign stats: {stats}")
-        return stats
-
-    except Exception as e:
-        logger.error(f"Error getting campaign stats: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    return CampaignResponse.from_orm(campaign)
 
 
-@router.get("/{campaign_id}", response_model=Dict[str, Any])
-async def get_campaign(campaign_id: int):
-    """Get a specific campaign by ID"""
+@router.put(
+    "/{campaign_id}",
+    response_model=CampaignResponse,
+    summary="Update campaign",
+    description="Update campaign information"
+)
+async def update_campaign(
+    campaign_id: str,
+    campaign_update: CampaignUpdate,
+    db: DatabaseSession,
+    current_user: PermissionDeps.UpdateCampaigns
+):
+    """
+    Update campaign information.
+    Campaign name uniqueness is enforced if name is being updated.
+    """
+    campaign_repo = CampaignRepository(db)
+    campaign = await campaign_repo.get_by_id(campaign_id)
 
-    try:
-        query = "SELECT * FROM campaigns WHERE id = ?"
-        results = db_manager.execute_query(query, (campaign_id,))
+    if not campaign:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Campaign not found"
+        )
 
-        if not results:
-            raise HTTPException(status_code=404, detail="Campaign not found")
+    # Check name uniqueness if being updated
+    update_data = campaign_update.dict(exclude_unset=True)
+    if "name" in update_data:
+        if await campaign_repo.name_exists(update_data["name"], exclude_id=campaign_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Campaign with this name already exists"
+            )
 
-        return results[0]
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting campaign {campaign_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-
-@router.put("/{campaign_id}", response_model=Dict[str, Any])
-async def update_campaign(campaign_id: int, campaign_data: Dict[str, Any]):
-    """Update a specific campaign"""
-
-    try:
-        # Check if campaign exists
-        existing = db_manager.execute_query("SELECT * FROM campaigns WHERE id = ?", (campaign_id,))
-        if not existing:
-            raise HTTPException(status_code=404, detail="Campaign not found")
-
-        # Build update query
-        update_fields = []
-        params = []
-
-        allowed_fields = [
-            "name", "description", "filter_criteria", "status", "leads_count", "target_count"
-        ]
-
-        for field in allowed_fields:
-            if field in campaign_data:
-                value = campaign_data[field]
-                if field == "filter_criteria" and isinstance(value, dict):
-                    value = json.dumps(value)
-                update_fields.append(f"{field} = ?")
-                params.append(value)
-
-        if not update_fields:
-            raise HTTPException(status_code=400, detail="No valid fields to update")
-
-        # Add updated_at timestamp
-        update_fields.append("updated_at = CURRENT_TIMESTAMP")
-
-        query = f"UPDATE campaigns SET {', '.join(update_fields)} WHERE id = ?"
-        params.append(campaign_id)
-
-        db_manager.execute_insert(query, tuple(params))
-
-        # Return updated campaign
-        updated = db_manager.execute_query("SELECT * FROM campaigns WHERE id = ?", (campaign_id,))
-
-        logger.info(f"Updated campaign {campaign_id}")
-        return updated[0]
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating campaign {campaign_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    updated_campaign = await campaign_repo.update(campaign, update_data)
+    return CampaignResponse.from_orm(updated_campaign)
 
 
-@router.delete("/{campaign_id}")
-async def delete_campaign(campaign_id: int):
-    """Delete a specific campaign"""
+@router.delete(
+    "/{campaign_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete campaign",
+    description="Delete campaign (soft delete)"
+)
+async def delete_campaign(
+    campaign_id: str,
+    db: DatabaseSession,
+    current_user: PermissionDeps.DeleteCampaigns
+):
+    """
+    Delete campaign (soft delete by default).
+    """
+    campaign_repo = CampaignRepository(db)
 
-    try:
-        # Check if campaign exists
-        existing = db_manager.execute_query("SELECT * FROM campaigns WHERE id = ?", (campaign_id,))
-        if not existing:
-            raise HTTPException(status_code=404, detail="Campaign not found")
+    if not await campaign_repo.exists(campaign_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Campaign not found"
+        )
 
-        # Delete campaign
-        query = "DELETE FROM campaigns WHERE id = ?"
-        db_manager.execute_insert(query, (campaign_id,))
-
-        logger.info(f"Deleted campaign {campaign_id}")
-        return {"message": "Campaign deleted successfully"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting campaign {campaign_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-
-@router.post("/{campaign_id}/start")
-async def start_campaign(campaign_id: int):
-    """Start a campaign"""
-
-    try:
-        # Check if campaign exists
-        existing = db_manager.execute_query("SELECT * FROM campaigns WHERE id = ?", (campaign_id,))
-        if not existing:
-            raise HTTPException(status_code=404, detail="Campaign not found")
-
-        campaign = existing[0]
-
-        if campaign["status"] == "active":
-            raise HTTPException(status_code=400, detail="Campaign is already active")
-
-        # Update campaign status to active
-        query = """
-        UPDATE campaigns
-        SET status = 'active', updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-        """
-        db_manager.execute_insert(query, (campaign_id,))
-
-        # Get updated campaign
-        updated = db_manager.execute_query("SELECT * FROM campaigns WHERE id = ?", (campaign_id,))
-
-        logger.info(f"Started campaign {campaign_id}")
-        return {
-            "message": "Campaign started successfully",
-            "campaign": updated[0]
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error starting campaign {campaign_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    await campaign_repo.delete(campaign_id)
 
 
-@router.post("/{campaign_id}/pause")
-async def pause_campaign(campaign_id: int):
-    """Pause a campaign"""
+@router.post(
+    "/{campaign_id}/start",
+    response_model=CampaignResponse,
+    summary="Start campaign",
+    description="Start a campaign"
+)
+async def start_campaign(
+    campaign_id: str,
+    db: DatabaseSession,
+    current_user: PermissionDeps.UpdateCampaigns
+):
+    """
+    Start a campaign that is currently in draft status.
+    """
+    campaign_repo = CampaignRepository(db)
+    campaign = await campaign_repo.start_campaign(campaign_id)
 
-    try:
-        # Check if campaign exists
-        existing = db_manager.execute_query("SELECT * FROM campaigns WHERE id = ?", (campaign_id,))
-        if not existing:
-            raise HTTPException(status_code=404, detail="Campaign not found")
+    if not campaign:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Campaign not found or cannot be started"
+        )
 
-        campaign = existing[0]
+    return CampaignResponse.from_orm(campaign)
 
-        if campaign["status"] != "active":
-            raise HTTPException(status_code=400, detail="Campaign is not active")
 
-        # Update campaign status to paused
-        query = """
-        UPDATE campaigns
-        SET status = 'paused', updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-        """
-        db_manager.execute_insert(query, (campaign_id,))
+@router.post(
+    "/{campaign_id}/pause",
+    response_model=CampaignResponse,
+    summary="Pause campaign",
+    description="Pause an active campaign"
+)
+async def pause_campaign(
+    campaign_id: str,
+    db: DatabaseSession,
+    current_user: PermissionDeps.UpdateCampaigns
+):
+    """
+    Pause an active campaign.
+    """
+    campaign_repo = CampaignRepository(db)
+    campaign = await campaign_repo.pause_campaign(campaign_id)
 
-        # Get updated campaign
-        updated = db_manager.execute_query("SELECT * FROM campaigns WHERE id = ?", (campaign_id,))
+    if not campaign:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Campaign not found or cannot be paused"
+        )
 
-        logger.info(f"Paused campaign {campaign_id}")
-        return {
-            "message": "Campaign paused successfully",
-            "campaign": updated[0]
-        }
+    return CampaignResponse.from_orm(campaign)
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error pausing campaign {campaign_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@router.post(
+    "/{campaign_id}/complete",
+    response_model=CampaignResponse,
+    summary="Complete campaign",
+    description="Mark campaign as completed"
+)
+async def complete_campaign(
+    campaign_id: str,
+    db: DatabaseSession,
+    current_user: PermissionDeps.UpdateCampaigns
+):
+    """
+    Mark campaign as completed.
+    """
+    campaign_repo = CampaignRepository(db)
+    campaign = await campaign_repo.complete_campaign(campaign_id)
+
+    if not campaign:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Campaign not found or cannot be completed"
+        )
+
+    return CampaignResponse.from_orm(campaign)
+
+
+@router.get(
+    "/status/{status}",
+    response_model=CampaignListResponse,
+    summary="Get campaigns by status",
+    description="Get campaigns filtered by specific status"
+)
+async def get_campaigns_by_status(
+    status: CampaignStatus,
+    db: DatabaseSession,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    current_user: PermissionDeps.ReadCampaigns = Depends()
+):
+    """
+    Get campaigns filtered by specific status.
+    """
+    campaign_repo = CampaignRepository(db)
+
+    skip = (page - 1) * size
+    campaigns = await campaign_repo.get_by_status(status, skip=skip, limit=size)
+    total = await campaign_repo.count(filters={"status": status.value})
+
+    return CampaignListResponse(
+        campaigns=[CampaignResponse.from_orm(campaign) for campaign in campaigns],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1) // size
+    )
+
+
+@router.get(
+    "/user/{user_id}",
+    response_model=CampaignListResponse,
+    summary="Get campaigns by user",
+    description="Get campaigns created by a specific user"
+)
+async def get_campaigns_by_user(
+    user_id: str,
+    db: DatabaseSession,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    status: Optional[CampaignStatus] = Query(None, description="Filter by status"),
+    current_user: PermissionDeps.ReadCampaigns = Depends()
+):
+    """
+    Get campaigns created by a specific user.
+    """
+    campaign_repo = CampaignRepository(db)
+
+    skip = (page - 1) * size
+    campaigns = await campaign_repo.get_user_campaigns(
+        user_id=user_id,
+        status=status,
+        skip=skip,
+        limit=size
+    )
+
+    # Count total for this user
+    filters = {"created_by": user_id}
+    if status:
+        filters["status"] = status.value
+    total = await campaign_repo.count(filters=filters)
+
+    return CampaignListResponse(
+        campaigns=[CampaignResponse.from_orm(campaign) for campaign in campaigns],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1) // size
+    )
+
+
+@router.get(
+    "/running",
+    response_model=CampaignListResponse,
+    summary="Get running campaigns",
+    description="Get campaigns that are currently running"
+)
+async def get_running_campaigns(
+    db: DatabaseSession,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    current_user: PermissionDeps.ReadCampaigns = Depends()
+):
+    """
+    Get campaigns that are currently running (started but not ended).
+    """
+    campaign_repo = CampaignRepository(db)
+
+    skip = (page - 1) * size
+    campaigns = await campaign_repo.get_running_campaigns(skip=skip, limit=size)
+
+    # Count running campaigns
+    total = await campaign_repo.count(
+        filters={"status": CampaignStatus.ACTIVE.value}
+    )
+
+    return CampaignListResponse(
+        campaigns=[CampaignResponse.from_orm(campaign) for campaign in campaigns],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1) // size
+    )
+
+
+@router.get(
+    "/overdue",
+    response_model=CampaignListResponse,
+    summary="Get overdue campaigns",
+    description="Get campaigns that should have been completed"
+)
+async def get_overdue_campaigns(
+    db: DatabaseSession,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    current_user: PermissionDeps.ReadCampaigns = Depends()
+):
+    """
+    Get campaigns that have been running for an extended period.
+    """
+    campaign_repo = CampaignRepository(db)
+
+    skip = (page - 1) * size
+    campaigns = await campaign_repo.get_overdue_campaigns(skip=skip, limit=size)
+    total = len(campaigns)  # Simplified count
+
+    return CampaignListResponse(
+        campaigns=[CampaignResponse.from_orm(campaign) for campaign in campaigns],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1) // size
+    )
+
+
+@router.post(
+    "/bulk-operations",
+    summary="Perform bulk operations on campaigns",
+    description="Perform bulk operations like status updates on multiple campaigns"
+)
+async def bulk_campaign_operations(
+    operation_data: BulkCampaignOperation,
+    db: DatabaseSession,
+    current_user: PermissionDeps.UpdateCampaigns
+):
+    """
+    Perform bulk operations on multiple campaigns.
+    Supported operations: update_status, delete
+    """
+    campaign_repo = CampaignRepository(db)
+
+    if operation_data.operation == "update_status":
+        if not operation_data.data or "status" not in operation_data.data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Status is required for update_status operation"
+            )
+
+        try:
+            campaign_status = CampaignStatus(operation_data.data["status"])
+            count = await campaign_repo.bulk_update_status(operation_data.campaign_ids, campaign_status)
+            return {"message": f"Updated status for {count} campaigns"}
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid status value"
+            )
+
+    elif operation_data.operation == "delete":
+        count = 0
+        for campaign_id in operation_data.campaign_ids:
+            if await campaign_repo.delete(campaign_id):
+                count += 1
+        return {"message": f"Deleted {count} campaigns"}
+
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported operation: {operation_data.operation}"
+        )

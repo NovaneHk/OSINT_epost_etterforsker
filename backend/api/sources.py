@@ -1,349 +1,620 @@
 """
-Sources API Endpoints
-CRUD operations for OSINT data sources
+OSINT E-post Etterforsker - Sources API Endpoints
+OSINT data source management and monitoring endpoints
 """
 
-from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Query, Depends
-import logging
-import json
+from typing import Annotated, List, Optional
 from datetime import datetime
 
-from backend.core.database import db_manager, create_tables
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 
-router = APIRouter()
-logger = logging.getLogger(__name__)
-
-
-class Source:
-    """Source data model"""
-    def __init__(self, name: str, **kwargs):
-        self.name = name
-        self.type = kwargs.get('type', 'website')
-        self.url = kwargs.get('url', '')
-        self.description = kwargs.get('description', '')
-        self.configuration = kwargs.get('configuration', '{}')
-        self.status = kwargs.get('status', 'active')
-        self.schedule_pattern = kwargs.get('schedule_pattern')
-        self.leads_count = int(kwargs.get('leads_count', 0))
-        self.success_rate = float(kwargs.get('success_rate', 0.0))
-        self.error_message = kwargs.get('error_message')
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "name": self.name,
-            "type": self.type,
-            "url": self.url,
-            "description": self.description,
-            "configuration": self.configuration,
-            "status": self.status,
-            "schedule_pattern": self.schedule_pattern,
-            "leads_count": self.leads_count,
-            "success_rate": self.success_rate,
-            "error_message": self.error_message
-        }
+from backend.core.dependencies import (
+    DatabaseSession,
+    CommonQuery,
+    PermissionDeps
+)
+from backend.models.source import (
+    Source,
+    SourceCreate,
+    SourceUpdate,
+    SourceResponse,
+    SourceListResponse,
+    SourceType,
+    SourceStatus
+)
+from backend.repositories.source import SourceRepository
 
 
-@router.get("/", response_model=List[Dict[str, Any]])
-async def get_sources(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1, le=1000),
-    status: Optional[str] = Query(None),
-    type: Optional[str] = Query(None),
-    search: Optional[str] = Query(None)
+router = APIRouter(prefix="/sources", tags=["Sources"])
+
+
+class SourceUsageUpdate(BaseModel):
+    """Schema for updating source usage statistics"""
+    requests_made: int = 1
+    success: bool = True
+
+
+class SourceHealthUpdate(BaseModel):
+    """Schema for updating source health status"""
+    is_healthy: bool
+    response_time: Optional[float] = None
+
+
+class SourceErrorReport(BaseModel):
+    """Schema for reporting source errors"""
+    error_message: str
+    error_code: Optional[str] = None
+
+
+class BulkSourceOperation(BaseModel):
+    """Schema for bulk operations on sources"""
+    source_ids: List[str]
+    operation: str
+    data: Optional[dict] = None
+
+
+@router.get(
+    "",
+    response_model=SourceListResponse,
+    summary="List sources",
+    description="Get paginated list of OSINT sources with optional filtering"
+)
+async def list_sources(
+    db: DatabaseSession,
+    common: CommonQuery,
+    current_user: PermissionDeps.ReadSources,
+    source_type: Optional[SourceType] = Query(None, description="Filter by source type"),
+    status: Optional[SourceStatus] = Query(None, description="Filter by source status"),
+    is_premium: Optional[bool] = Query(None, description="Filter by premium status"),
+    is_healthy: Optional[bool] = Query(None, description="Filter by health status"),
+    requires_api_key: Optional[bool] = Query(None, description="Filter by API key requirement")
 ):
-    """Get sources with pagination and filtering"""
+    """
+    List OSINT sources with pagination and filtering.
+    Supports filtering by type, status, premium status, health, and API key requirements.
+    """
+    source_repo = SourceRepository(db)
 
-    try:
-        # Ensure database tables exist
-        await create_tables()
+    # Build filters
+    filters = {}
+    if source_type:
+        filters["source_type"] = source_type.value
+    if status:
+        filters["status"] = status.value
+    if is_premium is not None:
+        filters["is_premium"] = is_premium
+    if is_healthy is not None:
+        filters["is_healthy"] = is_healthy
+    if requires_api_key is not None:
+        filters["requires_api_key"] = requires_api_key
 
-        # Build query
-        query = "SELECT * FROM sources"
-        params = []
-        conditions = []
+    # Get paginated results
+    result = await source_repo.get_paginated(
+        page=common.pagination["page"],
+        size=common.pagination["size"],
+        filters=filters,
+        order_by=common.search["sort"],
+        order_direction=common.search["order"]
+    )
 
-        if status:
-            conditions.append("status = ?")
-            params.append(status)
-
-        if type:
-            conditions.append("type = ?")
-            params.append(type)
-
-        if search:
-            conditions.append("(name LIKE ? OR description LIKE ? OR url LIKE ?)")
-            search_param = f"%{search}%"
-            params.extend([search_param, search_param, search_param])
-
-        if conditions:
-            query += " WHERE " + " AND ".join(conditions)
-
-        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-        params.extend([limit, skip])
-
-        # Execute query
-        results = db_manager.execute_query(query, tuple(params))
-
-        logger.info(f"Retrieved {len(results)} sources")
-        return results
-
-    except Exception as e:
-        logger.error(f"Error getting sources: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    return SourceListResponse(
+        sources=[SourceResponse.from_orm(source) for source in result["records"]],
+        total=result["total"],
+        page=result["page"],
+        size=result["size"],
+        pages=result["pages"]
+    )
 
 
-@router.post("/", response_model=Dict[str, Any])
-async def create_source(source_data: Dict[str, Any]):
-    """Create a new source"""
+@router.get(
+    "/search",
+    response_model=SourceListResponse,
+    summary="Search sources",
+    description="Search sources by name, description, or URL"
+)
+async def search_sources(
+    db: DatabaseSession,
+    q: str = Query(..., description="Search query"),
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    current_user: PermissionDeps.ReadSources = Depends()
+):
+    """
+    Search sources by name, description, or URL.
+    """
+    source_repo = SourceRepository(db)
 
-    try:
-        # Validate required fields
-        if not source_data.get("name"):
-            raise HTTPException(status_code=400, detail="Name is required")
+    skip = (page - 1) * size
+    sources = await source_repo.search_sources(q, skip=skip, limit=size)
+    total = len(sources)  # Simplified count for demo
 
-        # Ensure database tables exist
-        await create_tables()
+    return SourceListResponse(
+        sources=[SourceResponse.from_orm(source) for source in sources],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1) // size
+    )
 
-        # Create source object
-        source = Source(name=source_data["name"], **source_data)
 
-        # Insert into database
-        query = """
-        INSERT INTO sources (
-            name, type, url, description, configuration, status,
-            schedule_pattern, leads_count, success_rate, error_message
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
+@router.get(
+    "/statistics",
+    summary="Get source statistics",
+    description="Get comprehensive source statistics and metrics"
+)
+async def get_source_statistics(
+    db: DatabaseSession,
+    current_user: PermissionDeps.ReadSources
+):
+    """
+    Get comprehensive source statistics including usage, health, and performance metrics.
+    """
+    source_repo = SourceRepository(db)
+    return await source_repo.get_source_statistics()
 
-        source_id = db_manager.execute_insert(
-            query,
-            (source.name, source.type, source.url, source.description,
-             source.configuration, source.status, source.schedule_pattern,
-             source.leads_count, source.success_rate, source.error_message)
+
+@router.get(
+    "/most-used",
+    summary="Get most used sources",
+    description="Get sources ranked by usage frequency"
+)
+async def get_most_used_sources(
+    db: DatabaseSession,
+    limit: int = Query(10, ge=1, le=50, description="Number of top sources to return"),
+    current_user: PermissionDeps.ReadSources = Depends()
+):
+    """
+    Get most frequently used sources for analytics and optimization.
+    """
+    source_repo = SourceRepository(db)
+    return await source_repo.get_most_used_sources(limit=limit)
+
+
+@router.post(
+    "",
+    response_model=SourceResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create source",
+    description="Create a new OSINT data source"
+)
+async def create_source(
+    source_data: SourceCreate,
+    db: DatabaseSession,
+    current_user: PermissionDeps.CreateSources
+):
+    """
+    Create a new OSINT data source.
+    Source name must be unique across all sources.
+    """
+    source_repo = SourceRepository(db)
+
+    # Check if source name already exists
+    if await source_repo.name_exists(source_data.name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Source with this name already exists"
         )
 
-        result = source.to_dict()
-        result["id"] = source_id
-
-        logger.info(f"Created source: {source.name}")
-        return result
-
-    except Exception as e:
-        logger.error(f"Error creating source: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    source = await source_repo.create(source_data)
+    return SourceResponse.from_orm(source)
 
 
-@router.get("/stats", response_model=Dict[str, Any])
-async def get_source_stats():
-    """Get source statistics"""
+@router.get(
+    "/{source_id}",
+    response_model=SourceResponse,
+    summary="Get source",
+    description="Get source by ID with detailed information"
+)
+async def get_source(
+    source_id: str,
+    db: DatabaseSession,
+    current_user: PermissionDeps.ReadSources
+):
+    """
+    Get detailed source information by ID.
+    """
+    source_repo = SourceRepository(db)
+    source = await source_repo.get_detailed(source_id)
 
-    try:
-        # Ensure database tables exist
-        await create_tables()
+    if not source:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Source not found"
+        )
 
-        # Get total count
-        total_query = "SELECT COUNT(*) as count FROM sources"
-        total_result = db_manager.execute_query(total_query)
-        total_sources = total_result[0]["count"] if total_result else 0
-
-        # Get status breakdown
-        status_query = """
-        SELECT status, COUNT(*) as count
-        FROM sources
-        GROUP BY status
-        """
-        status_results = db_manager.execute_query(status_query)
-        status_breakdown = {row["status"]: row["count"] for row in status_results}
-
-        # Get type breakdown
-        type_query = """
-        SELECT type, COUNT(*) as count
-        FROM sources
-        GROUP BY type
-        """
-        type_results = db_manager.execute_query(type_query)
-        type_breakdown = {row["type"]: row["count"] for row in type_results}
-
-        # Calculate average success rate
-        success_query = "SELECT AVG(success_rate) as avg_rate FROM sources"
-        success_result = db_manager.execute_query(success_query)
-        avg_success_rate = success_result[0]["avg_rate"] if success_result else 0
-
-        # Get top performing sources
-        top_query = """
-        SELECT name, leads_count, success_rate
-        FROM sources
-        WHERE status = 'active'
-        ORDER BY leads_count DESC, success_rate DESC
-        LIMIT 5
-        """
-        top_results = db_manager.execute_query(top_query)
-
-        stats = {
-            "total_sources": total_sources,
-            "active_sources": status_breakdown.get("active", 0),
-            "inactive_sources": status_breakdown.get("inactive", 0),
-            "status_breakdown": status_breakdown,
-            "type_breakdown": type_breakdown,
-            "average_success_rate": round(avg_success_rate or 0, 2),
-            "top_performing": top_results
-        }
-
-        logger.info(f"Generated source stats: {stats}")
-        return stats
-
-    except Exception as e:
-        logger.error(f"Error getting source stats: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    return SourceResponse.from_orm(source)
 
 
-@router.get("/{source_id}", response_model=Dict[str, Any])
-async def get_source(source_id: int):
-    """Get a specific source by ID"""
+@router.put(
+    "/{source_id}",
+    response_model=SourceResponse,
+    summary="Update source",
+    description="Update source information"
+)
+async def update_source(
+    source_id: str,
+    source_update: SourceUpdate,
+    db: DatabaseSession,
+    current_user: PermissionDeps.UpdateSources
+):
+    """
+    Update source information.
+    Source name uniqueness is enforced if name is being updated.
+    """
+    source_repo = SourceRepository(db)
+    source = await source_repo.get_by_id(source_id)
 
-    try:
-        query = "SELECT * FROM sources WHERE id = ?"
-        results = db_manager.execute_query(query, (source_id,))
+    if not source:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Source not found"
+        )
 
-        if not results:
-            raise HTTPException(status_code=404, detail="Source not found")
+    # Check name uniqueness if being updated
+    update_data = source_update.dict(exclude_unset=True)
+    if "name" in update_data:
+        if await source_repo.name_exists(update_data["name"], exclude_id=source_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Source with this name already exists"
+            )
 
-        return results[0]
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting source {source_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-
-@router.put("/{source_id}", response_model=Dict[str, Any])
-async def update_source(source_id: int, source_data: Dict[str, Any]):
-    """Update a specific source"""
-
-    try:
-        # Check if source exists
-        existing = db_manager.execute_query("SELECT * FROM sources WHERE id = ?", (source_id,))
-        if not existing:
-            raise HTTPException(status_code=404, detail="Source not found")
-
-        # Build update query
-        update_fields = []
-        params = []
-
-        allowed_fields = [
-            "name", "type", "url", "description", "configuration", "status",
-            "schedule_pattern", "leads_count", "success_rate", "error_message"
-        ]
-
-        for field in allowed_fields:
-            if field in source_data:
-                update_fields.append(f"{field} = ?")
-                params.append(source_data[field])
-
-        if not update_fields:
-            raise HTTPException(status_code=400, detail="No valid fields to update")
-
-        # Add updated_at timestamp
-        update_fields.append("updated_at = CURRENT_TIMESTAMP")
-
-        query = f"UPDATE sources SET {', '.join(update_fields)} WHERE id = ?"
-        params.append(source_id)
-
-        db_manager.execute_insert(query, tuple(params))
-
-        # Return updated source
-        updated = db_manager.execute_query("SELECT * FROM sources WHERE id = ?", (source_id,))
-
-        logger.info(f"Updated source {source_id}")
-        return updated[0]
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating source {source_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    updated_source = await source_repo.update(source, update_data)
+    return SourceResponse.from_orm(updated_source)
 
 
-@router.delete("/{source_id}")
-async def delete_source(source_id: int):
-    """Delete a specific source"""
+@router.delete(
+    "/{source_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete source",
+    description="Delete source (soft delete)"
+)
+async def delete_source(
+    source_id: str,
+    db: DatabaseSession,
+    current_user: PermissionDeps.DeleteSources
+):
+    """
+    Delete source (soft delete by default).
+    """
+    source_repo = SourceRepository(db)
 
-    try:
-        # Check if source exists
-        existing = db_manager.execute_query("SELECT * FROM sources WHERE id = ?", (source_id,))
-        if not existing:
-            raise HTTPException(status_code=404, detail="Source not found")
+    if not await source_repo.exists(source_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Source not found"
+        )
 
-        # Delete source
-        query = "DELETE FROM sources WHERE id = ?"
-        db_manager.execute_insert(query, (source_id,))
-
-        logger.info(f"Deleted source {source_id}")
-        return {"message": "Source deleted successfully"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting source {source_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    await source_repo.delete(source_id)
 
 
-@router.post("/{source_id}/test")
-async def test_source_connection(source_id: int):
-    """Test source connection"""
+@router.post(
+    "/{source_id}/usage",
+    response_model=SourceResponse,
+    summary="Update source usage",
+    description="Update source usage statistics"
+)
+async def update_source_usage(
+    source_id: str,
+    usage_data: SourceUsageUpdate,
+    db: DatabaseSession,
+    current_user: PermissionDeps.UpdateSources
+):
+    """
+    Update source usage statistics after making requests to the source.
+    """
+    source_repo = SourceRepository(db)
+    source = await source_repo.update_usage_stats(
+        source_id,
+        usage_data.requests_made,
+        usage_data.success
+    )
 
-    try:
-        # Get source
-        source_query = "SELECT * FROM sources WHERE id = ?"
-        source_results = db_manager.execute_query(source_query, (source_id,))
+    if not source:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Source not found"
+        )
 
-        if not source_results:
-            raise HTTPException(status_code=404, detail="Source not found")
+    return SourceResponse.from_orm(source)
 
-        source = source_results[0]
 
-        # Mock connection test (replace with actual implementation)
-        import random
-        test_successful = random.choice([True, True, True, False])  # 75% success rate
+@router.post(
+    "/{source_id}/health",
+    response_model=SourceResponse,
+    summary="Update source health",
+    description="Update source health status and response time"
+)
+async def update_source_health(
+    source_id: str,
+    health_data: SourceHealthUpdate,
+    db: DatabaseSession,
+    current_user: PermissionDeps.UpdateSources
+):
+    """
+    Update source health status and response time metrics.
+    """
+    source_repo = SourceRepository(db)
+    source = await source_repo.update_health_status(
+        source_id,
+        health_data.is_healthy,
+        health_data.response_time
+    )
 
-        if test_successful:
-            # Update source with successful test
-            update_query = """
-            UPDATE sources
-            SET last_run = CURRENT_TIMESTAMP, error_message = NULL, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            """
-            db_manager.execute_insert(update_query, (source_id,))
+    if not source:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Source not found"
+        )
 
-            result = {
-                "status": "success",
-                "message": "Connection test successful",
-                "response_time": round(random.uniform(0.1, 2.0), 2),
-                "timestamp": datetime.now().isoformat()
-            }
-        else:
-            # Update source with error
-            error_msg = "Connection timeout or invalid credentials"
-            update_query = """
-            UPDATE sources
-            SET error_message = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            """
-            db_manager.execute_insert(update_query, (error_msg, source_id))
+    return SourceResponse.from_orm(source)
 
-            result = {
-                "status": "error",
-                "message": error_msg,
-                "timestamp": datetime.now().isoformat()
-            }
 
-        logger.info(f"Tested source {source_id}: {result['status']}")
-        return result
+@router.post(
+    "/{source_id}/error",
+    response_model=SourceResponse,
+    summary="Report source error",
+    description="Report an error encountered with the source"
+)
+async def report_source_error(
+    source_id: str,
+    error_data: SourceErrorReport,
+    db: DatabaseSession,
+    current_user: PermissionDeps.UpdateSources
+):
+    """
+    Report an error encountered when using the source.
+    """
+    source_repo = SourceRepository(db)
+    source = await source_repo.record_error(
+        source_id,
+        error_data.error_message,
+        error_data.error_code
+    )
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error testing source {source_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Test error: {str(e)}")
+    if not source:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Source not found"
+        )
+
+    return SourceResponse.from_orm(source)
+
+
+@router.get(
+    "/type/{source_type}",
+    response_model=SourceListResponse,
+    summary="Get sources by type",
+    description="Get sources filtered by specific type"
+)
+async def get_sources_by_type(
+    source_type: SourceType,
+    db: DatabaseSession,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    current_user: PermissionDeps.ReadSources = Depends()
+):
+    """
+    Get sources filtered by specific type.
+    """
+    source_repo = SourceRepository(db)
+
+    skip = (page - 1) * size
+    sources = await source_repo.get_by_type(source_type, skip=skip, limit=size)
+    total = await source_repo.count(filters={"source_type": source_type.value})
+
+    return SourceListResponse(
+        sources=[SourceResponse.from_orm(source) for source in sources],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1) // size
+    )
+
+
+@router.get(
+    "/status/{status}",
+    response_model=SourceListResponse,
+    summary="Get sources by status",
+    description="Get sources filtered by specific status"
+)
+async def get_sources_by_status(
+    status: SourceStatus,
+    db: DatabaseSession,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    current_user: PermissionDeps.ReadSources = Depends()
+):
+    """
+    Get sources filtered by specific status.
+    """
+    source_repo = SourceRepository(db)
+
+    skip = (page - 1) * size
+    sources = await source_repo.get_by_status(status, skip=skip, limit=size)
+    total = await source_repo.count(filters={"status": status.value})
+
+    return SourceListResponse(
+        sources=[SourceResponse.from_orm(source) for source in sources],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1) // size
+    )
+
+
+@router.get(
+    "/premium",
+    response_model=SourceListResponse,
+    summary="Get premium sources",
+    description="Get sources that require premium access"
+)
+async def get_premium_sources(
+    db: DatabaseSession,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    current_user: PermissionDeps.ReadSources = Depends()
+):
+    """
+    Get sources that require premium access.
+    """
+    source_repo = SourceRepository(db)
+
+    skip = (page - 1) * size
+    sources = await source_repo.get_premium_sources(skip=skip, limit=size)
+    total = await source_repo.count(filters={"is_premium": True})
+
+    return SourceListResponse(
+        sources=[SourceResponse.from_orm(source) for source in sources],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1) // size
+    )
+
+
+@router.get(
+    "/unhealthy",
+    response_model=SourceListResponse,
+    summary="Get unhealthy sources",
+    description="Get sources that are not responding properly"
+)
+async def get_unhealthy_sources(
+    db: DatabaseSession,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    current_user: PermissionDeps.ReadSources = Depends()
+):
+    """
+    Get sources that are not responding properly or have health issues.
+    """
+    source_repo = SourceRepository(db)
+
+    skip = (page - 1) * size
+    sources = await source_repo.get_unhealthy_sources(skip=skip, limit=size)
+    total = await source_repo.count(filters={"is_healthy": False})
+
+    return SourceListResponse(
+        sources=[SourceResponse.from_orm(source) for source in sources],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1) // size
+    )
+
+
+@router.get(
+    "/with-errors",
+    response_model=SourceListResponse,
+    summary="Get sources with errors",
+    description="Get sources that have recorded errors"
+)
+async def get_sources_with_errors(
+    db: DatabaseSession,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    current_user: PermissionDeps.ReadSources = Depends()
+):
+    """
+    Get sources that have recorded errors recently.
+    """
+    source_repo = SourceRepository(db)
+
+    skip = (page - 1) * size
+    sources = await source_repo.get_sources_with_errors(skip=skip, limit=size)
+    total = len(sources)  # Simplified count
+
+    return SourceListResponse(
+        sources=[SourceResponse.from_orm(source) for source in sources],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1) // size
+    )
+
+
+@router.get(
+    "/high-success-rate",
+    response_model=SourceListResponse,
+    summary="Get high success rate sources",
+    description="Get sources with high success rates"
+)
+async def get_high_success_rate_sources(
+    db: DatabaseSession,
+    min_success_rate: float = Query(0.8, ge=0.0, le=1.0, description="Minimum success rate"),
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    current_user: PermissionDeps.ReadSources = Depends()
+):
+    """
+    Get sources with high success rates above the specified threshold.
+    """
+    source_repo = SourceRepository(db)
+
+    skip = (page - 1) * size
+    sources = await source_repo.get_sources_by_success_rate(
+        min_success_rate=min_success_rate,
+        skip=skip,
+        limit=size
+    )
+    total = len(sources)  # Simplified count
+
+    return SourceListResponse(
+        sources=[SourceResponse.from_orm(source) for source in sources],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1) // size
+    )
+
+
+@router.post(
+    "/bulk-operations",
+    summary="Perform bulk operations on sources",
+    description="Perform bulk operations like status updates or error resets on multiple sources"
+)
+async def bulk_source_operations(
+    operation_data: BulkSourceOperation,
+    db: DatabaseSession,
+    current_user: PermissionDeps.UpdateSources
+):
+    """
+    Perform bulk operations on multiple sources.
+    Supported operations: update_status, reset_errors, delete
+    """
+    source_repo = SourceRepository(db)
+
+    if operation_data.operation == "update_status":
+        if not operation_data.data or "status" not in operation_data.data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Status is required for update_status operation"
+            )
+
+        try:
+            source_status = SourceStatus(operation_data.data["status"])
+            count = await source_repo.bulk_update_status(operation_data.source_ids, source_status)
+            return {"message": f"Updated status for {count} sources"}
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid status value"
+            )
+
+    elif operation_data.operation == "reset_errors":
+        count = await source_repo.reset_error_counts(operation_data.source_ids)
+        return {"message": f"Reset error counts for {count} sources"}
+
+    elif operation_data.operation == "delete":
+        count = 0
+        for source_id in operation_data.source_ids:
+            if await source_repo.delete(source_id):
+                count += 1
+        return {"message": f"Deleted {count} sources"}
+
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported operation: {operation_data.operation}"
+        )
