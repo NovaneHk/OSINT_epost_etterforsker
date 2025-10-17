@@ -79,6 +79,21 @@ leads_*.csv
 hubspot_import_*.csv
 mailerlite_import_*.csv
 
+# Additional secrets and production configs (do not commit)
+.env.production
+deploy/.env.production
+deploy/production.yml
+config.prod.yml
+integration-config.yml
+configs/**/secrets*.yml
+configs/**/secret*.yml
+*.pem
+*.key
+*.crt
+*.p12
+id_rsa*
+*.keystore
+
 # Node.js / Frontend
 node_modules/
 npm-debug.log*
