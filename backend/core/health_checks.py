@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 import psutil
-import aioredis
+# import aioredis  # Temporarily disabled due to Python 3.12 compatibility issue
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -156,7 +156,8 @@ class HealthMonitor:
                     details={"configured": False}
                 )
 
-            redis = aioredis.from_url(self.settings.redis_url)
+            # redis = aioredis.from_url(self.settings.redis_url)  # Temporarily disabled
+            raise Exception("Redis temporarily disabled due to compatibility issues")
 
             # Test basic connectivity
             pong = await redis.ping()

@@ -24,7 +24,7 @@ from backend.models.export import (
     ExportUpdate,
     ExportResponse,
     ExportListResponse,
-    ExportType,
+    ExportFormat,
     ExportStatus
 )
 from backend.repositories.export import ExportRepository
@@ -55,7 +55,7 @@ async def list_exports(
     db: DatabaseSession,
     common: CommonQuery,
     current_user: PermissionDeps.ReadExports,
-    export_type: Optional[ExportType] = Query(None, description="Filter by export type"),
+    export_type: Optional[ExportFormat] = Query(None, description="Filter by export type"),
     status: Optional[ExportStatus] = Query(None, description="Filter by export status"),
     created_by: Optional[str] = Query(None, description="Filter by creator")
 ):
@@ -116,8 +116,8 @@ async def get_export_statistics(
 )
 async def get_recent_exports(
     db: DatabaseSession,
-    limit: int = Query(10, ge=1, le=50, description="Number of recent exports to return"),
-    current_user: PermissionDeps.ReadExports = Depends()
+    current_user: PermissionDeps.ReadExports,
+    limit: int = Query(10, ge=1, le=50, description="Number of recent exports to return")
 ):
     """
     Get recently created exports for quick access.
@@ -409,9 +409,9 @@ async def download_export(
 )
 async def preview_export(
     export_id: str,
-    limit: int = Query(10, ge=1, le=100, description="Number of records to preview"),
     db: DatabaseSession,
-    current_user: PermissionDeps.ReadExports = Depends()
+    current_user: PermissionDeps.ReadExports,
+    limit: int = Query(10, ge=1, le=100, description="Number of records to preview")
 ):
     """
     Preview a sample of the export data before downloading.
@@ -458,9 +458,9 @@ async def preview_export(
 async def get_exports_by_status(
     status: ExportStatus,
     db: DatabaseSession,
+    current_user: PermissionDeps.ReadExports,
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.ReadExports = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Get exports filtered by specific status.
@@ -487,11 +487,11 @@ async def get_exports_by_status(
     description="Get exports filtered by specific type"
 )
 async def get_exports_by_type(
-    export_type: ExportType,
+    export_type: ExportFormat,
     db: DatabaseSession,
+    current_user: PermissionDeps.ReadExports,
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.ReadExports = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Get exports filtered by specific type.
@@ -520,9 +520,9 @@ async def get_exports_by_type(
 async def get_user_exports(
     user_id: str,
     db: DatabaseSession,
+    current_user: PermissionDeps.ReadExports,
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.ReadExports = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Get exports created by a specific user.
@@ -648,15 +648,15 @@ async def generate_export_content(export: Export, db):
         for i in range(1, 101)
     ]
 
-    if export.export_type == ExportType.CSV:
+    if export.export_type == ExportFormat.CSV:
         content = generate_csv_content(mock_data)
         media_type = "text/csv"
         filename = f"{export.name}.csv"
-    elif export.export_type == ExportType.JSON:
+    elif export.export_type == ExportFormat.JSON:
         content = json.dumps(mock_data, indent=2).encode('utf-8')
         media_type = "application/json"
         filename = f"{export.name}.json"
-    elif export.export_type == ExportType.EXCEL:
+    elif export.export_type == ExportFormat.XLSX:
         content = generate_excel_content(mock_data)
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         filename = f"{export.name}.xlsx"

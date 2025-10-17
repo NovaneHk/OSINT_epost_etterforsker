@@ -12,7 +12,7 @@ from sqlalchemy import Boolean, DateTime, Integer, String, Text, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from backend.models.base import BaseEntity, MetadataMixin
+from backend.models.base import MetadataMixin
 
 
 class ExportFormat(str, Enum):
@@ -33,10 +33,18 @@ class ExportStatus(str, Enum):
     EXPIRED = "expired"
 
 
-class Export(BaseEntity, MetadataMixin):
-    """Export model for managing data exports"""
+class Export(MetadataMixin):
+    """Export model for tracking data export operations"""
 
     __tablename__ = "exports"
+
+    # Primary key
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        nullable=False,
+        index=True
+    )
 
     # Basic information
     name: Mapped[str] = mapped_column(
@@ -221,7 +229,7 @@ class ExportBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=2000)
     format: ExportFormat
-    entity_type: str = Field(..., regex="^(leads|sources|campaigns|search_results)$")
+    entity_type: str = Field(..., pattern="^(leads|sources|campaigns|search_results)$")
     filters: Optional[Dict[str, Any]] = None
     columns: Optional[List[str]] = None
     campaign_id: Optional[str] = None

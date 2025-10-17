@@ -12,7 +12,7 @@ from sqlalchemy import Boolean, DateTime, Integer, String, Text, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from backend.models.base import BaseEntity, MetadataMixin
+from backend.models.base import MetadataMixin
 
 
 class CampaignStatus(str, Enum):
@@ -24,10 +24,18 @@ class CampaignStatus(str, Enum):
     ARCHIVED = "archived"
 
 
-class Campaign(BaseEntity, MetadataMixin):
-    """Campaign model for organizing OSINT investigations"""
+class Campaign(MetadataMixin):
+    """Campaign model for organizing and tracking OSINT email investigation campaigns"""
 
     __tablename__ = "campaigns"
+
+    # Primary key
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        nullable=False,
+        index=True
+    )
 
     # Basic information
     name: Mapped[str] = mapped_column(
@@ -144,3 +152,23 @@ class CampaignResponse(CampaignBase):
 
     class Config:
         from_attributes = True
+
+
+class CampaignListResponse(BaseModel):
+    """Schema for paginated campaign list response"""
+    campaigns: List[CampaignResponse]
+    total: int
+    page: int
+    size: int
+    pages: int
+
+
+class CampaignStatistics(BaseModel):
+    """Schema for campaign statistics"""
+    total_campaigns: int
+    active_campaigns: int
+    campaigns_by_status: Dict[str, int]
+    campaigns_by_type: Dict[str, int]
+    total_leads_generated: int
+    avg_leads_per_campaign: Optional[float]
+    success_rate: Optional[float]

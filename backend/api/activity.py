@@ -8,20 +8,30 @@ from typing import Dict, List, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select, desc, and_
-from backend.core.database import get_db
-from backend.models.database import Lead, Source, Campaign, Export, SearchRun
-from backend.schemas.response import BaseResponse
+from backend.core.dependencies import DatabaseSession
+from backend.models.lead import Lead
+from backend.models.source import Source
+from backend.models.campaign import Campaign
+from backend.models.export import Export
+from backend.models.search_run import SearchRun
+
+# Simple response model
+from pydantic import BaseModel
+
+class BaseResponse(BaseModel):
+    data: Any = None
+    message: str = "Success"
 
 router = APIRouter(prefix="/activity", tags=["Activity"])
 
 
 @router.get("/", response_model=BaseResponse)
 async def get_recent_activity(
+    db: DatabaseSession,
     limit: int = Query(50, ge=1, le=200, description="Maximum number of activities to return"),
     offset: int = Query(0, ge=0, description="Number of activities to skip"),
     days: int = Query(7, ge=1, le=30, description="Number of days to look back"),
-    activity_type: Optional[str] = Query(None, description="Filter by activity type"),
-    db: AsyncSession = Depends(get_db)
+    activity_type: Optional[str] = Query(None, description="Filter by activity type")
 ):
     """
     Get recent system activity across all modules
@@ -176,8 +186,8 @@ async def get_recent_activity(
 
 @router.get("/summary", response_model=BaseResponse)
 async def get_activity_summary(
-    days: int = Query(7, ge=1, le=30, description="Number of days to summarize"),
-    db: AsyncSession = Depends(get_db)
+    db: DatabaseSession,
+    days: int = Query(7, ge=1, le=30, description="Number of days to summarize")
 ):
     """
     Get activity summary statistics for the specified period

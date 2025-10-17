@@ -12,7 +12,7 @@ from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from backend.models.base import BaseEntity, MetadataMixin
+from backend.models.base import MetadataMixin
 
 
 class SourceType(str, Enum):
@@ -38,10 +38,18 @@ class SourceStatus(str, Enum):
     EXPIRED = "expired"
 
 
-class Source(BaseEntity, MetadataMixin):
-    """Source model for managing OSINT data sources"""
+class Source(MetadataMixin):
+    """Source model for storing and managing OSINT data sources"""
 
     __tablename__ = "sources"
+
+    # Primary key
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        nullable=False,
+        index=True
+    )
 
     # Basic information
     name: Mapped[str] = mapped_column(
@@ -369,7 +377,7 @@ class SourceListResponse(BaseModel):
 class SourceTest(BaseModel):
     """Schema for testing source connection"""
     test_query: Optional[str] = "test@example.com"
-    test_type: str = Field("email", regex="^(email|domain|company|person)$")
+    test_type: str = Field("email", pattern="^(email|domain|company|person)$")
 
 
 class SourceTestResult(BaseModel):

@@ -404,7 +404,7 @@ export function LeadTable({
   // Get selected lead IDs
   const selectedLeadIds = useMemo(() => {
     return table.getSelectedRowModel().rows.map(row => row.original.id);
-  }, [rowSelection, table]);
+  }, [rowSelection]);
 
   // Bulk actions
   const handleBulkAction = (action: string) => {

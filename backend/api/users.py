@@ -79,10 +79,10 @@ async def list_users(
 )
 async def search_users(
     db: DatabaseSession,
+    current_user: PermissionDeps.CreateUsers,
     q: str = Query(..., description="Search query"),
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.CreateUsers = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Search users by email, username, first name, or last name.
@@ -343,9 +343,9 @@ async def deactivate_user(
 async def get_users_by_role(
     role: UserRole,
     db: DatabaseSession,
+    current_user: PermissionDeps.CreateUsers,
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.CreateUsers = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Get users by specific role.

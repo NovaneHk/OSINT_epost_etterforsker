@@ -15,6 +15,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+from dataclasses import dataclass, field
+
+@dataclass
+class AuditEntry:
+    action: str = ""
+    timestamp: str = ""
+    user: str = ""
+    details: dict = field(default_factory=dict)
+
 
 class ContactStatus(Enum):
     """Enumeration of contact statuses"""
@@ -29,45 +38,26 @@ class ContactStatus(Enum):
 
 @dataclass
 class Contact:
-    """Contact data model"""
     email: str
     domain: str
-    name: Optional[str] = None
-    role: Optional[str] = None
-    company: Optional[str] = None
+    name: str = ""
+    role: str = ""
+    company: str = ""
     status: ContactStatus = ContactStatus.UNVALIDATED
     confidence_score: float = 0.0
     overall_score: float = 0.0
-    persona_match: Optional[str] = None
-    source: Optional[str] = None
-    source_url: Optional[str] = None
+    persona_match: str = ""
+    source: str = ""
+    source_url: str = ""
     extracted_at: Optional[datetime] = None
     validated_at: Optional[datetime] = None
+    sector: str = ""
 
     def __post_init__(self):
-        """Post-initialization processing"""
         if isinstance(self.status, str):
             self.status = ContactStatus(self.status)
         if self.extracted_at is None:
             self.extracted_at = datetime.now()
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert contact to dictionary"""
-        return {
-            'email': self.email,
-            'domain': self.domain,
-            'name': self.name,
-            'role': self.role,
-            'company': self.company,
-            'status': self.status.value if isinstance(self.status, ContactStatus) else self.status,
-            'confidence_score': self.confidence_score,
-            'overall_score': self.overall_score,
-            'persona_match': self.persona_match,
-            'source': self.source,
-            'source_url': self.source_url,
-            'extracted_at': self.extracted_at.isoformat() if self.extracted_at else None,
-            'validated_at': self.validated_at.isoformat() if self.validated_at else None
-        }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Contact':

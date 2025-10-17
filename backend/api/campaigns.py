@@ -103,10 +103,10 @@ async def list_campaigns(
 )
 async def search_campaigns(
     db: DatabaseSession,
+    current_user: PermissionDeps.ReadCampaigns,
     q: str = Query(..., description="Search query"),
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.ReadCampaigns = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Search campaigns by name or description.
@@ -150,8 +150,8 @@ async def get_campaign_statistics(
 )
 async def get_campaigns_by_creator_stats(
     db: DatabaseSession,
-    limit: int = Query(10, ge=1, le=50, description="Number of top creators to return"),
-    current_user: PermissionDeps.ReadCampaigns = Depends()
+    current_user: PermissionDeps.ReadCampaigns,
+    limit: int = Query(10, ge=1, le=50, description="Number of top creators to return")
 ):
     """
     Get campaign creation statistics by user for analytics.
@@ -369,9 +369,9 @@ async def complete_campaign(
 async def get_campaigns_by_status(
     status: CampaignStatus,
     db: DatabaseSession,
+    current_user: PermissionDeps.ReadCampaigns,
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.ReadCampaigns = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Get campaigns filtered by specific status.
@@ -400,10 +400,10 @@ async def get_campaigns_by_status(
 async def get_campaigns_by_user(
     user_id: str,
     db: DatabaseSession,
+    current_user: PermissionDeps.ReadCampaigns,
     page: int = Query(1, ge=1, description="Page number"),
     size: int = Query(20, ge=1, le=100, description="Page size"),
-    status: Optional[CampaignStatus] = Query(None, description="Filter by status"),
-    current_user: PermissionDeps.ReadCampaigns = Depends()
+    status: Optional[CampaignStatus] = Query(None, description="Filter by status")
 ):
     """
     Get campaigns created by a specific user.
@@ -441,9 +441,9 @@ async def get_campaigns_by_user(
 )
 async def get_running_campaigns(
     db: DatabaseSession,
+    current_user: PermissionDeps.ReadCampaigns,
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.ReadCampaigns = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Get campaigns that are currently running (started but not ended).
@@ -475,9 +475,9 @@ async def get_running_campaigns(
 )
 async def get_overdue_campaigns(
     db: DatabaseSession,
+    current_user: PermissionDeps.ReadCampaigns,
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.ReadCampaigns = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Get campaigns that have been running for an extended period.

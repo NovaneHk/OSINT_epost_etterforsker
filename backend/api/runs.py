@@ -121,8 +121,8 @@ async def get_run_statistics(
 )
 async def get_recent_runs(
     db: DatabaseSession,
-    limit: int = Query(10, ge=1, le=50, description="Number of recent runs to return"),
-    current_user: PermissionDeps.ReadRuns = Depends()
+    current_user: PermissionDeps.ReadRuns,
+    limit: int = Query(10, ge=1, le=50, description="Number of recent runs to return")
 ):
     """
     Get recently created or executed search runs for quick access.
@@ -615,9 +615,9 @@ async def get_run_progress(
 async def get_runs_by_status(
     status: SearchRunStatus,
     db: DatabaseSession,
+    current_user: PermissionDeps.ReadRuns,
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.ReadRuns = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Get search runs filtered by specific status.
@@ -646,9 +646,9 @@ async def get_runs_by_status(
 async def get_runs_by_type(
     run_type: SearchRunType,
     db: DatabaseSession,
+    current_user: PermissionDeps.ReadRuns,
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.ReadRuns = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Get search runs filtered by specific type.
@@ -677,9 +677,9 @@ async def get_runs_by_type(
 async def get_user_runs(
     user_id: str,
     db: DatabaseSession,
+    current_user: PermissionDeps.ReadRuns,
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.ReadRuns = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Get search runs created by a specific user.

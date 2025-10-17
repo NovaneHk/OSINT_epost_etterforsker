@@ -12,7 +12,7 @@ from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, ForeignK
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from backend.models.base import BaseEntity, MetadataMixin
+from backend.models.base import MetadataMixin
 
 
 class SearchResultType(str, Enum):
@@ -36,10 +36,18 @@ class ConfidenceLevel(str, Enum):
     UNKNOWN = "unknown"
 
 
-class SearchResult(BaseEntity, MetadataMixin):
-    """Search result model for storing OSINT findings"""
+class SearchResult(MetadataMixin):
+    """Search result model for storing OSINT search results"""
 
     __tablename__ = "search_results"
+
+    # Primary key
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        nullable=False,
+        index=True
+    )
 
     # Search context
     query: Mapped[str] = mapped_column(
@@ -347,5 +355,5 @@ class SearchSession(BaseModel):
 class SearchResultBulkOperation(BaseModel):
     """Schema for bulk operations on search results"""
     result_ids: List[str] = Field(..., min_items=1)
-    operation: str = Field(..., regex="^(verify|tag|delete|update_confidence|update_scores)$")
+    operation: str = Field(..., pattern="^(verify|tag|delete|update_confidence|update_scores)$")
     data: Optional[Dict[str, Any]] = None

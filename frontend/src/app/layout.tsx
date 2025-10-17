@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Inter, JetBrains_Mono } from 'next/font/google';
+import { Inter, Poppins, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { ThemeProvider } from '@/components/providers/theme-provider';
 import { I18nProvider } from '@/components/providers/i18n-provider';
@@ -10,10 +10,18 @@ import { ErrorProvider } from '@/components/providers/error-boundary';
 import { LoadingProvider } from '@/components/providers/loading-provider';
 import { SidebarNav } from '@/components/layout/sidebar-nav';
 import { TopNav } from '@/components/layout/top-nav';
+import { FloatingActions } from '@/components/layout/floating-actions';
 
 const inter = Inter({
   subsets: ['latin'],
   variable: '--font-sans',
+  display: 'swap',
+});
+
+const poppins = Poppins({
+  subsets: ['latin'],
+  weight: ['300', '400', '500', '600', '700'],
+  variable: '--font-heading',
   display: 'swap',
 });
 
@@ -64,7 +72,7 @@ export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="nb" suppressHydrationWarning>
       <body
-        className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}
+        className={`${inter.variable} ${poppins.variable} ${jetbrainsMono.variable} font-sans antialiased`}
       >
         <I18nProvider>
           <ThemeProvider
@@ -100,6 +108,9 @@ export default function RootLayout({ children }: RootLayoutProps) {
                         </main>
                       </div>
                     </div>
+
+                    {/* Floating Actions */}
+                    <FloatingActions />
                   </div>
                     <ToastProvider />
                   </KeyboardShortcutsProvider>

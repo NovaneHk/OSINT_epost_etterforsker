@@ -1,0 +1,58 @@
+search_dorks:
+  ecommerce:
+  - powered by shopify {geo}
+  - inurl:contact "e-commerce" OR "online store"
+  - '"webshop" OR "online retail" {geo}'
+  - site:shopify.com {geo} store
+  manufacturing:
+  - '"manufacturing company" {geo} contact'
+  - intitle:"about us" manufacturing {geo}
+  - '"industrial" OR "production" {geo} team'
+  technology:
+  - inurl:about-us "CTO" OR "technology"
+  - site:crunchbase.com {geo} tech startup
+  - '"software company" {geo} contact'
+  - intitle:"team" "CTO" OR "tech lead" {geo}
+source_categories:
+  company_sites:
+    crawl_patterns:
+    - /about
+    - /contact
+    - /team
+    - /press
+    - /investors
+    daily_limit: 2000
+    priority: 3
+  directories:
+    daily_limit: 1000
+    priority: 1
+    sources:
+    - company_selector: .member-item
+      contact_selector: .contact-link
+      credibility_score: 95
+      enabled: true
+      name: Norwegian Chamber of Commerce
+      name_selector: .company-name
+      type: static
+      url: https://www.chamber.no/member-directory
+    - credibility_score: 85
+      enabled: true
+      name: Nordic Tech Directory
+      pagination: true
+      type: dynamic
+      url: https://nordictech.directory/companies
+      wait_selector: .company-grid
+  events:
+    daily_limit: 500
+    priority: 2
+    sources:
+    - credibility_score: 90
+      enabled: true
+      name: TechCrunch Disrupt Exhibitors
+      type: dynamic
+      url: https://techcrunch.com/events/disrupt/exhibitors
+    - credibility_score: 85
+      enabled: true
+      name: Web Summit Startups
+      type: static
+      url: https://websummit.com/startups

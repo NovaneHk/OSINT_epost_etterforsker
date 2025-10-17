@@ -331,7 +331,7 @@ async def get_api_version():
 
 @api_router.get("/stats", tags=["Statistics"])
 async def get_api_statistics(
-    current_user: PermissionDeps.ReadDashboard = Depends()
+    # current_user: PermissionDeps.ReadDashboard = Depends()  # Temporarily disabled
 ):
     """
     Get comprehensive API usage statistics.

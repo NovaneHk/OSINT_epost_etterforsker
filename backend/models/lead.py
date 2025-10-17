@@ -13,7 +13,7 @@ from sqlalchemy import Boolean, DateTime, Integer, Numeric, String, Text, Foreig
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from backend.models.base import BaseEntity, MetadataMixin
+from backend.models.base import MetadataMixin
 
 
 class LeadStatus(str, Enum):
@@ -51,10 +51,18 @@ class LeadPriority(str, Enum):
     URGENT = "urgent"
 
 
-class Lead(BaseEntity, MetadataMixin):
+class Lead(MetadataMixin):
     """Lead model for storing and tracking email investigation targets"""
 
     __tablename__ = "leads"
+
+    # Primary key
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        nullable=False,
+        index=True
+    )
 
     # Basic contact information
     email: Mapped[str] = mapped_column(
@@ -495,7 +503,7 @@ class LeadExport(BaseModel):
     """Schema for exporting leads"""
     lead_ids: Optional[List[str]] = None
     filters: Optional[Dict[str, Any]] = None
-    format: str = Field("csv", regex="^(csv|xlsx|json)$")
+    format: str = Field("csv", pattern="^(csv|xlsx|json)$")
     include_osint_data: bool = False
 
 

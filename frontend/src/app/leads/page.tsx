@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useSearchParams } from 'next/navigation';
 import { SmartFilterBar } from '@/components/shared/smart-filter-bar';
 import { LeadTable } from '@/components/leads/lead-table';
 import { Button } from '@/components/ui/button';
@@ -80,14 +79,14 @@ export default function LeadsPage() {
   const [deleteLeadIds, setDeleteLeadIds] = useState<string[]>([]);
 
   // Convert filters to LeadFilters format
-  const leadFilters: LeadFilters = useMemo(() => ({
+  const leadFilters: LeadFilters = {
     search: filters.search || undefined,
     tags: filters.tags.length > 0 ? filters.tags : undefined,
     page,
     limit: 50,
     sort_by: sort.field,
     sort_order: sort.direction,
-  }), [filters, sort, page]);
+  };
 
   // Fetch leads
   const {
@@ -163,21 +162,21 @@ export default function LeadsPage() {
   });
 
   // Event handlers
-  const handleFiltersChange = useCallback((newFilters: FilterState) => {
+  const handleFiltersChange = (newFilters: FilterState) => {
     setFilters(newFilters);
     setPage(1); // Reset to first page when filters change
-  }, []);
+  };
 
-  const handleSortChange = useCallback((newSort: SortState) => {
+  const handleSortChange = (newSort: SortState) => {
     setSort(newSort);
     setPage(1); // Reset to first page when sort changes
-  }, []);
+  };
 
-  const handleRowSelect = useCallback((lead: Lead) => {
+  const handleRowSelect = (lead: Lead) => {
     setSelectedLead(lead);
-  }, []);
+  };
 
-  const handleBulkAction = useCallback((action: string, leadIds: string[]) => {
+  const handleBulkAction = (action: string, leadIds: string[]) => {
     switch (action) {
       case 'delete':
         setDeleteLeadIds(leadIds);
@@ -192,24 +191,24 @@ export default function LeadsPage() {
       default:
         break;
     }
-  }, [exportMutation]);
+  };
 
-  const handleExport = useCallback((leadIds?: string[]) => {
+  const handleExport = (leadIds?: string[]) => {
     exportMutation.mutate(leadIds);
-  }, [exportMutation]);
+  };
 
-  const handleDeleteConfirm = useCallback(() => {
+  const handleDeleteConfirm = () => {
     batchUpdateMutation.mutate({
       lead_ids: deleteLeadIds,
       updates: { verification_status: 'invalid' as const }
     });
     setShowDeleteDialog(false);
     setDeleteLeadIds([]);
-  }, [batchUpdateMutation, deleteLeadIds]);
+  };
 
-  const handleStartRun = useCallback(() => {
+  const handleStartRun = () => {
     runMutation.mutate();
-  }, [runMutation]);
+  };
 
   // Computed values
   const leadsData = leadsResponse?.data || [];

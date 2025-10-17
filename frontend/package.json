@@ -57,6 +57,7 @@
     "clsx": "2.0.0",
     "cmdk": "0.2.0",
     "critters": "^0.0.23",
+    "framer-motion": "^12.23.19",
     "lucide-react": "^0.302.0",
     "next": "14.0.4",
     "next-intl": "3.5.0",

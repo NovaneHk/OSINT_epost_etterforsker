@@ -8,15 +8,24 @@ from typing import Dict, List, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
-from backend.core.database import get_db
-from backend.models.database import Lead, Source, Campaign, Export, SearchRun
-from backend.schemas.response import BaseResponse
+from pydantic import BaseModel
+from backend.core.dependencies import DatabaseSession
+from backend.models.lead import Lead
+from backend.models.source import Source
+from backend.models.campaign import Campaign
+from backend.models.export import Export
+from backend.models.search_run import SearchRun
+
+# Pydantic response model
+class BaseResponse(BaseModel):
+    data: Any = None
+    message: str = "Success"
 
 router = APIRouter(prefix="/kpis", tags=["KPIs"])
 
 
 @router.get("/", response_model=BaseResponse)
-async def get_kpis(db: AsyncSession = Depends(get_db)):
+async def get_kpis(db: DatabaseSession):
     """
     Get key performance indicators for the dashboard
 
@@ -141,7 +150,7 @@ async def get_kpis(db: AsyncSession = Depends(get_db)):
 @router.get("/trends", response_model=BaseResponse)
 async def get_kpi_trends(
     days: int = 30,
-    db: AsyncSession = Depends(get_db)
+    db: DatabaseSession = None
 ):
     """
     Get KPI trends over time for charts and graphs

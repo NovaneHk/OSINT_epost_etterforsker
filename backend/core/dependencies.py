@@ -174,6 +174,14 @@ class PermissionDeps:
     # Export permissions
     ReadExports = Annotated[User, Depends(require_permissions("read:exports"))]
     CreateExports = Annotated[User, Depends(require_permissions("create:exports"))]
+    UpdateExports = Annotated[User, Depends(require_permissions("update:exports"))]
+    DeleteExports = Annotated[User, Depends(require_permissions("delete:exports"))]
+
+    # Search run permissions
+    ReadRuns = Annotated[User, Depends(require_permissions("read:runs"))]
+    CreateRuns = Annotated[User, Depends(require_permissions("create:runs"))]
+    UpdateRuns = Annotated[User, Depends(require_permissions("update:runs"))]
+    DeleteRuns = Annotated[User, Depends(require_permissions("delete:runs"))]
 
     # Search result permissions
     ReadSearchResults = Annotated[User, Depends(require_permissions("read:search_results"))]

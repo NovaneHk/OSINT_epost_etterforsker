@@ -1,0 +1,127 @@
+compliance_settings:
+  audit_logging: true
+  automatic_opt_out: true
+  data_retention_days: 90
+  gdpr_compliance_mode: true
+  privacy_policy_url: https://yourcompany.com/privacy
+geographic_targeting:
+  dach:
+    countries:
+    - DE
+    - AT
+    - CH
+    languages:
+    - de
+    - en
+    scoring_boost: 15
+    tld_preferences:
+    - .de
+    - .at
+    - .ch
+  eu_core:
+    countries:
+    - FR
+    - NL
+    - BE
+    - LU
+    - IE
+    languages:
+    - fr
+    - nl
+    - en
+    scoring_boost: 10
+    tld_preferences:
+    - .fr
+    - .nl
+    - .be
+    - .eu
+  nordics:
+    countries:
+    - 'NO'
+    - SE
+    - DK
+    - FI
+    - IS
+    languages:
+    - nb
+    - sv
+    - da
+    - fi
+    - is
+    - en
+    scoring_boost: 20
+    tld_preferences:
+    - .no
+    - .se
+    - .dk
+    - .fi
+    - .is
+processing_rules:
+  filtering_rules:
+    exclude_consumer_domains: true
+    exclude_educational: true
+    exclude_government: false
+    max_personal_email_ratio: 0.1
+    min_company_size: 10
+  rate_limiting:
+    backoff_multiplier: 2
+    max_concurrent: 10
+    requests_per_second: 2
+    respect_crawl_delay: true
+    retry_attempts: 3
+  scoring_weights:
+    data_freshness: 0.05
+    geographic_preference: 0.2
+    persona_match: 0.35
+    sector_relevance: 0.25
+    source_credibility: 0.15
+  validation_thresholds:
+    max_risk_score: 30
+    min_confidence_score: 0.6
+    require_mx_validation: true
+    smtp_probe_enabled: false
+sector_definitions:
+  ecommerce:
+    keywords:
+    - e-commerce
+    - retail
+    - online store
+    - webshop
+    scoring_multiplier: 1.3
+    size_indicators:
+    - GMV
+    - orders
+    - customers
+    technology_signals:
+    - Shopify
+    - WooCommerce
+    - Magento
+  manufacturing:
+    exclusions:
+    - retail
+    - service
+    keywords:
+    - manufacturing
+    - production
+    - industrial
+    scoring_multiplier: 1.0
+    size_indicators:
+    - employees
+    - facilities
+    - revenue
+  technology:
+    keywords:
+    - SaaS
+    - software
+    - tech
+    - digital
+    - cloud
+    - AI
+    negative_keywords:
+    - hardware
+    - manufacturing
+    scoring_multiplier: 1.5
+    size_indicators:
+    - startup
+    - scale-up
+    - enterprise

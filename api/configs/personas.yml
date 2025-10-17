@@ -1,0 +1,77 @@
+personas:
+  operations_leaders:
+    email_patterns:
+    - ops@
+    - operations@
+    - coo@
+    - admin@
+    negative_signals:
+    - coordinator
+    - assistant
+    - clerk
+    priority_level: medium
+    roles:
+    - COO
+    - Operations Manager
+    - Head of Operations
+    - VP Operations
+    - Operations Director
+    scoring_weight: 30
+  procurement_specialists:
+    email_patterns:
+    - procurement@
+    - purchasing@
+    - sourcing@
+    - buyer@
+    - supply@
+    negative_signals:
+    - assistant
+    - clerk
+    - junior
+    priority_level: high
+    roles:
+    - Procurement Manager
+    - Purchasing Director
+    - Supply Chain Manager
+    - Buyer
+    - Sourcing Manager
+    scoring_weight: 35
+  sales_leaders:
+    email_patterns:
+    - sales@
+    - business@
+    - bd@
+    - revenue@
+    negative_signals:
+    - rep
+    - junior
+    - assistant
+    priority_level: medium
+    roles:
+    - Sales Director
+    - VP Sales
+    - Head of Sales
+    - Business Development
+    - Revenue Operations
+    scoring_weight: 25
+  technical_leaders:
+    email_patterns:
+    - cto@
+    - tech@
+    - engineering@
+    - dev@
+    - technical@
+    negative_signals:
+    - intern
+    - junior
+    - assistant
+    - coordinator
+    priority_level: high
+    roles:
+    - CTO
+    - Tech Lead
+    - VP Engineering
+    - Head of Technology
+    - Technical Director
+    - Chief Technology Officer
+    scoring_weight: 40

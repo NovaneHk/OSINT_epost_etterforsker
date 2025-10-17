@@ -115,10 +115,10 @@ async def list_sources(
 )
 async def search_sources(
     db: DatabaseSession,
+    current_user: PermissionDeps.ReadSources,
     q: str = Query(..., description="Search query"),
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.ReadSources = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Search sources by name, description, or URL.
@@ -161,8 +161,8 @@ async def get_source_statistics(
 )
 async def get_most_used_sources(
     db: DatabaseSession,
-    limit: int = Query(10, ge=1, le=50, description="Number of top sources to return"),
-    current_user: PermissionDeps.ReadSources = Depends()
+    current_user: PermissionDeps.ReadSources,
+    limit: int = Query(10, ge=1, le=50, description="Number of top sources to return")
 ):
     """
     Get most frequently used sources for analytics and optimization.
@@ -391,9 +391,9 @@ async def report_source_error(
 async def get_sources_by_type(
     source_type: SourceType,
     db: DatabaseSession,
+    current_user: PermissionDeps.ReadSources,
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.ReadSources = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Get sources filtered by specific type.
@@ -422,9 +422,9 @@ async def get_sources_by_type(
 async def get_sources_by_status(
     status: SourceStatus,
     db: DatabaseSession,
+    current_user: PermissionDeps.ReadSources,
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.ReadSources = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Get sources filtered by specific status.
@@ -452,9 +452,9 @@ async def get_sources_by_status(
 )
 async def get_premium_sources(
     db: DatabaseSession,
+    current_user: PermissionDeps.ReadSources,
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.ReadSources = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Get sources that require premium access.
@@ -482,9 +482,9 @@ async def get_premium_sources(
 )
 async def get_unhealthy_sources(
     db: DatabaseSession,
+    current_user: PermissionDeps.ReadSources,
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.ReadSources = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Get sources that are not responding properly or have health issues.
@@ -512,9 +512,9 @@ async def get_unhealthy_sources(
 )
 async def get_sources_with_errors(
     db: DatabaseSession,
+    current_user: PermissionDeps.ReadSources,
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.ReadSources = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Get sources that have recorded errors recently.
@@ -542,10 +542,10 @@ async def get_sources_with_errors(
 )
 async def get_high_success_rate_sources(
     db: DatabaseSession,
+    current_user: PermissionDeps.ReadSources,
     min_success_rate: float = Query(0.8, ge=0.0, le=1.0, description="Minimum success rate"),
     page: int = Query(1, ge=1, description="Page number"),
-    size: int = Query(20, ge=1, le=100, description="Page size"),
-    current_user: PermissionDeps.ReadSources = Depends()
+    size: int = Query(20, ge=1, le=100, description="Page size")
 ):
     """
     Get sources with high success rates above the specified threshold.

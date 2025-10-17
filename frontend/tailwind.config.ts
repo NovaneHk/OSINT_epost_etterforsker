@@ -1,4 +1,5 @@
 import type { Config } from 'tailwindcss'
+import { fontFamily } from 'tailwindcss/defaultTheme'
 
 const config: Config = {
   darkMode: ['class'],
@@ -51,6 +52,43 @@ const config: Config = {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',
         },
+        // Premium OSINT color palette
+        osint: {
+          primary: '#0A84FF',
+          'primary-dark': '#0066CC',
+          'primary-light': '#4DA3FF',
+          secondary: '#4ADE80',
+          'secondary-dark': '#22C55E',
+          'secondary-light': '#86EFAC',
+          success: '#10B981',
+          warning: '#F59E0B',
+          error: '#EF4444',
+          info: '#3B82F6',
+        },
+        // Dark mode specific colors
+        dark: {
+          bg: '#0F172A',
+          'bg-secondary': '#1E293B',
+          'bg-tertiary': '#334155',
+          surface: '#1E293B',
+          'surface-hover': '#334155',
+          border: '#334155',
+          text: '#F8FAFC',
+          'text-secondary': '#CBD5E1',
+          'text-muted': '#94A3B8',
+        },
+        // Light mode specific colors
+        light: {
+          bg: '#FFFFFF',
+          'bg-secondary': '#F8FAFC',
+          'bg-tertiary': '#F1F5F9',
+          surface: '#FFFFFF',
+          'surface-hover': '#F8FAFC',
+          border: '#E2E8F0',
+          text: '#0F172A',
+          'text-secondary': '#475569',
+          'text-muted': '#64748B',
+        },
       },
       borderRadius: {
         lg: 'var(--radius)',
@@ -102,8 +140,9 @@ const config: Config = {
         'slide-in-from-right': 'slide-in-from-right 0.2s ease-out',
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
-        mono: ['JetBrains Mono', 'Menlo', 'Monaco', 'monospace'],
+        sans: ['var(--font-sans)', ...fontFamily.sans],
+        heading: ['var(--font-heading)', ...fontFamily.sans],
+        mono: ['var(--font-mono)', ...fontFamily.mono],
       },
     },
   },

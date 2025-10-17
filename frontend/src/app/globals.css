@@ -4,16 +4,17 @@
 
 @layer base {
   :root {
+    /* Light mode - Premium OSINT theme */
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
     --card: 0 0% 100%;
     --card-foreground: 222.2 84% 4.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222.2 84% 4.9%;
+    --primary: 213 100% 52%; /* #0A84FF Apple Blue */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 142 76% 36%; /* #4ADE80 converted to HSL */
+    --secondary-foreground: 0 0% 100%;
     --muted: 210 40% 96%;
     --muted-foreground: 215.4 16.3% 46.9%;
     --accent: 210 40% 96%;
@@ -22,30 +23,49 @@
     --destructive-foreground: 210 40% 98%;
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
-    --radius: 0.5rem;
+    --ring: 213 100% 52%;
+    --radius: 0.75rem;
+
+    /* Premium OSINT specific colors */
+    --osint-primary: 213 100% 52%; /* #0A84FF */
+    --osint-primary-dark: 213 100% 40%; /* #0066CC */
+    --osint-secondary: 142 76% 36%; /* #4ADE80 */
+    --osint-success: 142 71% 45%; /* #10B981 */
+    --osint-warning: 38 92% 50%; /* #F59E0B */
+    --osint-error: 0 84% 60%; /* #EF4444 */
+    --osint-info: 217 91% 60%; /* #3B82F6 */
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
+    /* Dark mode - Premium OSINT theme */
+    --background: 222.2 84% 4.9%; /* #0F172A */
     --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
+    --card: 217.2 32.6% 17.5%; /* #1E293B */
     --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
+    --popover: 217.2 32.6% 17.5%;
     --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 84% 4.9%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
+    --primary: 213 100% 52%; /* Keep same blue in dark mode */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 142 76% 36%; /* Keep same green */
+    --secondary-foreground: 0 0% 100%;
     --muted: 217.2 32.6% 17.5%;
     --muted-foreground: 215 20.2% 65.1%;
     --accent: 217.2 32.6% 17.5%;
     --accent-foreground: 210 40% 98%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
+    --border: 217.2 32.6% 17.5%; /* #334155 */
     --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 94.1%;
+    --ring: 213 100% 52%;
+
+    /* Dark mode specific overrides */
+    --osint-primary: 213 100% 52%;
+    --osint-primary-dark: 213 100% 40%;
+    --osint-secondary: 142 76% 36%;
+    --osint-success: 142 71% 45%;
+    --osint-warning: 38 92% 50%;
+    --osint-error: 0 84% 60%;
+    --osint-info: 217 91% 60%;
   }
 }
 

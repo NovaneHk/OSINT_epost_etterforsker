@@ -5,14 +5,14 @@ User authentication and authorization models with RBAC support
 
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr, Field, validator
 from sqlalchemy import Boolean, DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from backend.models.base import BaseEntity, MetadataMixin
+from backend.models.base import MetadataMixin
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -34,18 +34,18 @@ class UserStatus(str, Enum):
     PENDING = "pending"
 
 
-class User(BaseEntity, MetadataMixin):
-    baseentity_id: Mapped[Optional[str]] = mapped_column(
-        String(36),
-        nullable=True,
-        index=True,
-        comment="ForeignKey to baseentitys.id",
-    )
-    # Hvis du bruker UUID som id i BaseEntity, bruk UUID og ForeignKey:
-    # baseentity_id: Mapped[Optional[str]] = mapped_column(UUID(as_uuid=False), ForeignKey('baseentitys.id'), nullable=True)
+class User(MetadataMixin):
     """User model for authentication and authorization"""
 
     __tablename__ = "users"
+
+    # Primary key
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        nullable=False,
+        index=True
+    )
 
     # Basic user information
     email: Mapped[str] = mapped_column(
@@ -304,6 +304,24 @@ class UserResponse(UserBase):
 
     class Config:
         from_attributes = True
+
+
+class UserListResponse(BaseModel):
+    """Schema for paginated user list response"""
+    users: List[UserResponse]
+    total: int
+    page: int
+    size: int
+    pages: int
+
+
+class UserStatistics(BaseModel):
+    """Schema for user statistics"""
+    total_users: int
+    active_users: int
+    users_by_role: Dict[str, int]
+    recent_registrations: int
+    avg_session_duration: Optional[float]
 
 
 class UserLogin(BaseModel):

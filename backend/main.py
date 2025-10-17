@@ -19,7 +19,7 @@ from backend.core.config import get_settings
 from backend.core.database import create_tables, close_db_connections
 from backend.core.logging import setup_logging
 from backend.api.routes import api_router
-from backend.core.error_handlers import setup_error_handlers
+from backend.core.error_handlers import setup_exception_handlers
 from backend.middleware.rate_limiter import RateLimiterMiddleware
 from backend.middleware.request_logger import RequestLoggerMiddleware
 
@@ -96,7 +96,7 @@ def create_application() -> FastAPI:
     app.add_middleware(RequestLoggerMiddleware)
 
     # Setup error handlers
-    setup_error_handlers(app)
+    setup_exception_handlers(app)
 
     # Include API routes
     app.include_router(api_router, prefix="/api")

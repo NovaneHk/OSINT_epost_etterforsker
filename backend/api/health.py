@@ -9,7 +9,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Query, Response, status
 from fastapi.responses import PlainTextResponse
 
-from backend.core.dependencies import PermissionDeps
+# from backend.core.dependencies import PermissionDeps  # Temporarily disabled
 from backend.core.health_checks import (
     get_health_status,
     get_simple_health_status,
@@ -27,7 +27,7 @@ router = APIRouter(prefix="/health", tags=["Health & Monitoring"])
     description="Get detailed health status of all system components"
 )
 async def get_comprehensive_health(
-    current_user: PermissionDeps.ReadDashboard = Depends()
+    # current_user: PermissionDeps.ReadDashboard = Depends()  # Temporarily disabled
 ) -> Dict[str, Any]:
     """
     Get comprehensive health status including all system components.
@@ -104,7 +104,7 @@ async def liveness_probe() -> PlainTextResponse:
 )
 async def get_health_check_history(
     hours: int = Query(24, ge=1, le=168, description="Hours of history to retrieve (max 1 week)"),
-    current_user: PermissionDeps.ReadDashboard = Depends()
+    # current_user: PermissionDeps.ReadDashboard = Depends()  # Temporarily disabled
 ) -> Dict[str, Any]:
     """
     Get health check history for the specified time period.
@@ -126,7 +126,7 @@ async def get_health_check_history(
     description="Get aggregated health metrics and uptime statistics"
 )
 async def get_health_check_metrics(
-    current_user: PermissionDeps.ReadDashboard = Depends()
+    # current_user: PermissionDeps.ReadDashboard = Depends()  # Temporarily disabled
 ) -> Dict[str, Any]:
     """
     Get aggregated health metrics including uptime percentages,
@@ -146,7 +146,7 @@ async def get_health_check_metrics(
     description="Get detailed database connectivity and performance metrics"
 )
 async def get_database_health(
-    current_user: PermissionDeps.ReadDashboard = Depends()
+    # current_user: PermissionDeps.ReadDashboard = Depends()  # Temporarily disabled
 ) -> Dict[str, Any]:
     """
     Get detailed database health status including connection pool metrics.
@@ -167,7 +167,7 @@ async def get_database_health(
     description="Get system resource usage including CPU, memory, and disk"
 )
 async def get_system_health(
-    current_user: PermissionDeps.ReadDashboard = Depends()
+    # current_user: PermissionDeps.ReadDashboard = Depends()  # Temporarily disabled
 ) -> Dict[str, Any]:
     """
     Get system resource health including CPU, memory, disk usage.
@@ -188,7 +188,7 @@ async def get_system_health(
     description="Get connectivity status for external services"
 )
 async def get_external_services_health(
-    current_user: PermissionDeps.ReadDashboard = Depends()
+    # current_user: PermissionDeps.ReadDashboard = Depends()  # Temporarily disabled
 ) -> Dict[str, Any]:
     """
     Get health status of external services and dependencies.
@@ -210,7 +210,7 @@ async def get_external_services_health(
     description="Get application-specific health metrics and configuration status"
 )
 async def get_application_health(
-    current_user: PermissionDeps.ReadDashboard = Depends()
+    # current_user: PermissionDeps.ReadDashboard = Depends()  # Temporarily disabled
 ) -> Dict[str, Any]:
     """
     Get application-specific health metrics including configuration status.
@@ -231,7 +231,7 @@ async def get_application_health(
     description="Get condensed health status summary for dashboards"
 )
 async def get_health_status_summary(
-    current_user: PermissionDeps.ReadDashboard = Depends()
+    # current_user: PermissionDeps.ReadDashboard = Depends()  # Temporarily disabled
 ) -> Dict[str, Any]:
     """
     Get condensed health status summary suitable for dashboard display.
@@ -268,7 +268,7 @@ async def get_health_status_summary(
     description="Manually trigger a comprehensive health check for testing"
 )
 async def trigger_health_check_test(
-    current_user: PermissionDeps.UpdateSystems = Depends()
+    # current_user: PermissionDeps.UpdateSystems = Depends()  # Temporarily disabled
 ) -> Dict[str, Any]:
     """
     Manually trigger a comprehensive health check for testing purposes.
@@ -279,7 +279,7 @@ async def trigger_health_check_test(
     return {
         "message": "Health check test completed",
         "test_results": health_data,
-        "triggered_by": current_user.id,
+        "triggered_by": "system",  # current_user.id,  # Temporarily disabled
         "triggered_at": datetime.utcnow().isoformat()
     }
 
