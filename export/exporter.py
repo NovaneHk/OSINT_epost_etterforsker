@@ -305,3 +305,19 @@ class DataExporter:
         except Exception:
             return False
 
+    # --------------- Public helper aliases (for tests/backward-compat) ---------------
+    def apply_filters(self, contacts, export_filter: Optional[ExportFilter] = None):
+        return self._apply_filters(contacts, export_filter)
+
+    def prepare_export_data(self, contacts, columns: Optional[Iterable[str]] = None):
+        return self._prepare_export_data(contacts, columns)
+
+    def generate_filename(self, base_name: str, fmt: ExportFormat) -> str:
+        return self._generate_filename(base_name, fmt)
+
+    def get_file_size(self, file_path: str) -> int:
+        return self._get_file_size(file_path)
+
+    def validate_output_path(self, file_path: str) -> bool:
+        return self._validate_output_path(file_path)
+
