@@ -18,6 +18,7 @@ import {
   Search,
   Zap,
   ChevronRight,
+  Activity,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -78,6 +79,13 @@ const navigation: NavItem[] = [
     icon: Workflow,
     shortcut: 'G P',
     description: 'Automatiserte arbeidsflyter',
+  },
+  {
+    href: '/monitoring',
+    label: 'Overvåking',
+    icon: Activity,
+    shortcut: 'G M',
+    description: 'Systemstatus og overvåking',
   },
   {
     href: '/settings',
