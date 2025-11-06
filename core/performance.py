@@ -47,6 +47,7 @@ class PerformanceMonitor:
             'email_extraction_rate': 1.0,  # emails per second
             'validation_rate': 10.0  # validations per second
         }
+        self.operations = []  # To track operations for get_metrics
 
         # Start background monitoring
         self._monitoring_active = True
@@ -147,6 +148,14 @@ class PerformanceMonitor:
                         category,
                         {'function': func.__name__}
                     )
+
+                    # Add to operations list for get_metrics
+                    self.operations.append({
+                        'name': name,
+                        'function': func.__name__,
+                        'duration': duration_ms,
+                        'timestamp': datetime.now().isoformat()
+                    })
             return wrapper
         return decorator
 
@@ -169,7 +178,27 @@ class PerformanceMonitor:
         name = timer_id.rsplit('_', 1)[0]
         self.record_metric(f"{name}_duration_ms", duration_ms, 'ms', category)
 
+        # Add to operations list for get_metrics
+        self.operations.append({
+            'name': name,
+            'duration': duration_ms,
+            'timestamp': datetime.now().isoformat(),
+            'category': category
+        })
+
         return duration_ms
+
+    def get_metrics(self) -> Dict[str, Any]:
+        """Get performance metrics for all tracked operations.
+
+        Returns:
+            Dict containing all operations tracked with their performance metrics
+        """
+        return {
+            "total_operations": len(self.operations),
+            "operations": self.operations,
+            "average_time": sum(op.get('duration', 0) for op in self.operations) / len(self.operations) if self.operations else 0
+        }
 
     def measure_database_performance(self, db_path: str) -> Dict[str, Any]:
         """Measure database performance metrics."""
