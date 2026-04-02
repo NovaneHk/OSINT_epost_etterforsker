@@ -117,7 +117,11 @@ class ConnectorManager:
             'hibp_connector',
             'spiderfoot_connector',
             'reconng_connector',
-            'intelowl_connector'
+            'intelowl_connector',
+            # Wave 4
+            'metagoofil_connector',
+            'pwndb_connector',
+            'novanexus_connector',
         ]
 
         for module_name in connector_modules:

@@ -68,8 +68,36 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       - CORS_ORIGINS=http://frontend:3000,http://localhost:3000,http://127.0.0.1:3000
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
       - CREATE_TABLES_ON_STARTUP=true
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - GDPR_REQUIRE_CONSENT=${GDPR_REQUIRE_CONSENT:-false}
+      # OSINT tool keys (optional — leave blank to disable)
+      - HIBP_API_KEY=${HIBP_API_KEY:-}
+      - SPIDERFOOT_URL=${SPIDERFOOT_URL:-}
+      - SPIDERFOOT_API_KEY=${SPIDERFOOT_API_KEY:-}
+      - INTELOWL_URL=${INTELOWL_URL:-http://localhost:80}
+      - INTELOWL_API_KEY=${INTELOWL_API_KEY:-}
+      - RECONNG_PATH=${RECONNG_PATH:-}
+      # Wave 4 integrations
+      - PWNDB_TOR_PROXY=${PWNDB_TOR_PROXY:-socks5h://127.0.0.1:9050}
+      - NOVANEXUS_API_URL=${NOVANEXUS_API_URL:-}
+      - NOVANEXUS_API_KEY=${NOVANEXUS_API_KEY:-}
+      - NOVANEXUS_CAMPAIGN_ID=${NOVANEXUS_CAMPAIGN_ID:-}
+      # CRM integrations
+      - SALESFORCE_INSTANCE_URL=${SALESFORCE_INSTANCE_URL:-}
+      - SALESFORCE_CLIENT_ID=${SALESFORCE_CLIENT_ID:-}
+      - SALESFORCE_CLIENT_SECRET=${SALESFORCE_CLIENT_SECRET:-}
+      - HUBSPOT_ACCESS_TOKEN=${HUBSPOT_ACCESS_TOKEN:-}
+      - M365_TENANT_ID=${M365_TENANT_ID:-}
+      - M365_CLIENT_ID=${M365_CLIENT_ID:-}
+      - M365_CLIENT_SECRET=${M365_CLIENT_SECRET:-}
+      # Automation
+      - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL:-}
+      - N8N_API_KEY=${N8N_API_KEY:-}
+      # Production docs
+      - ENABLE_ADMIN_DOCS=${ENABLE_ADMIN_DOCS:-false}
+      - ADMIN_DOCS_TOKEN=${ADMIN_DOCS_TOKEN:-}
     volumes:
       - ./backend/data:/app/data
       - ./logs:/app/logs
