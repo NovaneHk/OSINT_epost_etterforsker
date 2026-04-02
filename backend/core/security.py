@@ -141,13 +141,28 @@ class JWTManager:
         try:
             payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
             token_data = TokenData(**payload)
-            # Check revocation blacklist
+        # Check revocation blacklist (in-memory fast path)
             if token_data.jti in self._revoked_jtis:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Token has been revoked",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
+            # Check DB blacklist (persisted across restarts)
+            try:
+                from backend.core.database import is_jti_revoked_in_db
+                if is_jti_revoked_in_db(token_data.jti):
+                    # Warm up the in-memory cache so next check is fast
+                    self._revoked_jtis[token_data.jti] = token_data.exp
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Token has been revoked",
+                        headers={"WWW-Authenticate": "Bearer"},
+                    )
+            except HTTPException:
+                raise
+            except Exception:
+                pass  # DB unavailable — rely on in-memory blacklist only
             return token_data
         except jwt.ExpiredSignatureError:
             raise HTTPException(
@@ -183,9 +198,15 @@ class JWTManager:
         )
 
     def revoke_token(self, jti: str, expire_at: float) -> None:
-        """Add a JTI to the revocation blacklist."""
+        """Add a JTI to the revocation blacklist (memory + persistent DB)."""
         self._revoked_jtis[jti] = expire_at
-        # Clean up expired entries to prevent unbounded growth
+        # Persist to DB so revocations survive restarts
+        try:
+            from backend.core.database import revoke_jti_in_db
+            revoke_jti_in_db(jti, expire_at)
+        except Exception:
+            pass  # In-memory blacklist still covers this session
+        # Clean up expired in-memory entries to prevent unbounded growth
         now = datetime.now(timezone.utc).timestamp()
         self._revoked_jtis = {k: v for k, v in self._revoked_jtis.items() if v > now}
 

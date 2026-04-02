@@ -185,7 +185,22 @@ class Settings:
         if self.ENVIRONMENT == "production":
             raise ValueError(f"{env_name} must be set in production")
 
-        return secrets.token_urlsafe(48)
+        # Persist the generated dev secret so tokens survive restarts
+        secret_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", f".dev_secret_{env_name.lower()}")
+        try:
+            os.makedirs(os.path.dirname(secret_file), exist_ok=True)
+            if os.path.exists(secret_file):
+                with open(secret_file, "r") as f:
+                    persisted = f.read().strip()
+                if persisted:
+                    return persisted
+            new_secret = secrets.token_urlsafe(48)
+            with open(secret_file, "w") as f:
+                f.write(new_secret)
+            return new_secret
+        except OSError:
+            # Fallback to ephemeral secret if filesystem not writable
+            return secrets.token_urlsafe(48)
 
     def _parse_csv_env(self, env_name: str, default: List[str]) -> List[str]:
         raw_value = os.getenv(env_name, "")

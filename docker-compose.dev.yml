@@ -1,0 +1,48 @@
+﻿# docker-compose.dev.yml — Development overrides
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# Overrides:
+#   - nginx: HTTP-only (no SSL certs needed)
+#   - backend: DEBUG=true, ENVIRONMENT=development, stable dev secrets
+#   - Disables external-dependency services (prometheus, grafana) for fast startup
+
+services:
+  backend:
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - SECRET_KEY=dev-only-secret-key-change-for-production-use
+      - JWT_SECRET_KEY=dev-only-jwt-secret-key-change-for-production-use
+      - LOG_LEVEL=DEBUG
+      - SEED_DEFAULT_ADMIN=true
+    volumes:
+      - .:/app/src:ro   # mount source for live reload (optional)
+
+  frontend:
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_ENVIRONMENT=development
+      - NEXT_PUBLIC_DEBUG=true
+
+  nginx:
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf
+      - ./nginx/logs:/var/log/nginx
+    # Remove the SSL volume mount used in base compose
+    # (no ./nginx/ssl mount needed for dev)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Disable heavy monitoring services in dev for faster startup
+  prometheus:
+    profiles:
+      - monitoring
+
+  grafana:
+    profiles:
+      - monitoring

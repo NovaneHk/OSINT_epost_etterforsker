@@ -256,6 +256,12 @@ async def create_tables():
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS jwt_blacklist (
+        jti TEXT PRIMARY KEY,
+        revoked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at REAL NOT NULL
+    );
     """
 
     try:
@@ -440,3 +446,36 @@ async def check_database_health() -> bool:
 async def get_db_session():
     """Get database manager for dependency injection."""
     return db_manager
+
+
+# --- JWT blacklist helpers (used by security.py to persist revoked tokens) ---
+
+def revoke_jti_in_db(jti: str, expires_at: float) -> None:
+    """Persist a revoked JTI to the jwt_blacklist table."""
+    try:
+        with db_manager.get_connection() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO jwt_blacklist (jti, expires_at) VALUES (?, ?)",
+                (jti, expires_at),
+            )
+            conn.commit()
+            # Prune expired entries (keep table small)
+            import time
+            conn.execute("DELETE FROM jwt_blacklist WHERE expires_at < ?", (time.time(),))
+            conn.commit()
+    except Exception:
+        pass  # Fail silently — in-memory cache in JWTManager still covers this session
+
+
+def is_jti_revoked_in_db(jti: str) -> bool:
+    """Check if a JTI has been revoked (persisted blacklist, survives restarts)."""
+    try:
+        import time
+        with db_manager.get_connection() as conn:
+            row = conn.execute(
+                "SELECT jti FROM jwt_blacklist WHERE jti = ? AND expires_at > ?",
+                (jti, time.time()),
+            ).fetchone()
+            return row is not None
+    except Exception:
+        return False  # Fail open — in-memory blacklist is the first check
