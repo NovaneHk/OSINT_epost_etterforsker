@@ -11,7 +11,7 @@ from datetime import datetime
 
 from backend.core.database import db_manager, create_tables
 
-router = APIRouter()
+router = APIRouter(prefix="/settings", tags=["Settings"])
 logger = logging.getLogger(__name__)
 
 
@@ -103,7 +103,7 @@ async def get_setting_categories():
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
-@router.get("/{setting_key}", response_model=Dict[str, Any])
+@router.get("/key/{setting_key}", response_model=Dict[str, Any])
 async def get_setting(setting_key: str):
     """Get a specific setting by key"""
 
@@ -193,7 +193,35 @@ async def create_setting(setting_data: Dict[str, Any]):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
-@router.put("/{setting_key}", response_model=Dict[str, Any])
+@router.put("/", response_model=Dict[str, Any])
+async def bulk_update_settings(settings_data: Dict[str, Any]):
+    """Bulk update settings (frontend contract: PUT /api/settings)"""
+    try:
+        await create_tables()
+        updated = []
+        for key, value in settings_data.items():
+            serialized = json.dumps(value) if isinstance(value, (dict, list)) else str(value)
+            existing = db_manager.execute_query(
+                "SELECT id FROM settings WHERE key = ?", (key,)
+            )
+            if existing:
+                db_manager.execute_write(
+                    "UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+                    (serialized, key),
+                )
+            else:
+                db_manager.execute_insert(
+                    "INSERT INTO settings (key, value) VALUES (?, ?)",
+                    (key, serialized),
+                )
+            updated.append(key)
+        return {"message": f"Updated {len(updated)} settings", "updated_keys": updated}
+    except Exception as e:
+        logger.error(f"Error bulk updating settings: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@router.put("/key/{setting_key}", response_model=Dict[str, Any])
 async def update_setting(setting_key: str, setting_data: Dict[str, Any]):
     """Update an existing setting"""
 
@@ -256,7 +284,7 @@ async def update_setting(setting_key: str, setting_data: Dict[str, Any]):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
-@router.delete("/{setting_key}")
+@router.delete("/key/{setting_key}")
 async def delete_setting(setting_key: str):
     """Delete a specific setting"""
 

@@ -61,7 +61,10 @@ export const queryKeys = {
 export function useKPIs(options?: UseQueryOptions<KPIResponse>) {
   return useQuery({
     queryKey: queryKeys.kpis,
-    queryFn: api.getKPIs,
+    queryFn: async () => {
+      const data = await api.getKPIs();
+      return { data, success: true, message: '' } as KPIResponse;
+    },
     staleTime: 5 * 60 * 1000, // 5 minutes
     ...options,
   });
@@ -70,7 +73,10 @@ export function useKPIs(options?: UseQueryOptions<KPIResponse>) {
 export function useActivity(options?: UseQueryOptions<ActivityResponse>) {
   return useQuery({
     queryKey: queryKeys.activity,
-    queryFn: api.getActivity,
+    queryFn: async () => {
+      const data = await api.getActivity();
+      return data; // getActivity already returns ActivityResponse
+    },
     staleTime: 2 * 60 * 1000, // 2 minutes
     ...options,
   });

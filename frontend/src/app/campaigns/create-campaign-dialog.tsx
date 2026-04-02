@@ -11,13 +11,14 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { toast } from "sonner"
+import { api } from '@/lib/api'
 
 interface Source {
-  id: number
+  id: string
   name: string
   type: string
   status: string
-  description: string
+  description?: string
 }
 
 interface CreateCampaignDialogProps {
@@ -31,7 +32,7 @@ export default function CreateCampaignDialog({ open, onOpenChange, onSuccess }: 
     name: '',
     description: '',
     type: 'manual',
-    sources: [] as number[],
+    sources: [] as string[],
     filter_criteria: {
       keywords: '',
       industries: '',
@@ -56,11 +57,8 @@ export default function CreateCampaignDialog({ open, onOpenChange, onSuccess }: 
   const fetchSources = async () => {
     try {
       setIsLoading(true)
-      const response = await fetch('/api/sources')
-      if (response.ok) {
-        const data = await response.json()
-        setSources(data.filter((source: Source) => source.status === 'active'))
-      }
+      const data = await api.getSources()
+      setSources(data.data.filter((source) => source.status === 'active'))
     } catch (error) {
       console.error('Error fetching sources:', error)
       toast.error('Failed to load sources')
@@ -84,59 +82,44 @@ export default function CreateCampaignDialog({ open, onOpenChange, onSuccess }: 
 
     try {
       setIsSubmitting(true)
-
-      const campaignData = {
+      await api.createCampaign({
         name: formData.name,
         description: formData.description,
-        type: formData.type,
-        sources: formData.sources,
-        filter_criteria: formData.filter_criteria,
-        leads_target: formData.leads_target,
-        status: 'draft'
-      }
-
-      const response = await fetch('/api/campaigns', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+        filter_criteria: {
+          ...formData.filter_criteria,
+          type: formData.type,
         },
-        body: JSON.stringify(campaignData),
+        target_count: formData.leads_target,
+        target_sources: formData.sources,
       })
+      toast.success('Campaign created successfully')
+      onSuccess()
+      onOpenChange(false)
 
-      if (response.ok) {
-        toast.success('Campaign created successfully')
-        onSuccess()
-        onOpenChange(false)
-
-        // Reset form
-        setFormData({
-          name: '',
-          description: '',
-          type: 'manual',
-          sources: [],
-          filter_criteria: {
-            keywords: '',
-            industries: '',
-            locations: '',
-            job_titles: '',
-            company_size: '',
-            exclude_keywords: ''
-          },
-          leads_target: 100
-        })
-      } else {
-        const error = await response.text()
-        toast.error(`Failed to create campaign: ${error}`)
-      }
+      setFormData({
+        name: '',
+        description: '',
+        type: 'manual',
+        sources: [],
+        filter_criteria: {
+          keywords: '',
+          industries: '',
+          locations: '',
+          job_titles: '',
+          company_size: '',
+          exclude_keywords: ''
+        },
+        leads_target: 100
+      })
     } catch (error) {
       console.error('Error creating campaign:', error)
-      toast.error('Error creating campaign')
+      toast.error(error instanceof Error ? error.message : 'Error creating campaign')
     } finally {
       setIsSubmitting(false)
     }
   }
 
-  const handleSourceToggle = (sourceId: number) => {
+  const handleSourceToggle = (sourceId: string) => {
     setFormData(prev => ({
       ...prev,
       sources: prev.sources.includes(sourceId)

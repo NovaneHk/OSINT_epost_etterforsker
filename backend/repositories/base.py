@@ -1,4 +1,4 @@
-"""
+﻿"""
 OSINT E-post Etterforsker - Base Repository
 Abstract base repository with common CRUD operations
 """
@@ -96,7 +96,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], ABC
 
     async def create(self, obj_in: CreateSchemaType) -> ModelType:
         """Create a new record"""
-        obj_data = obj_in.dict() if hasattr(obj_in, 'dict') else obj_in
+        obj_data = obj_in.model_dump() if hasattr(obj_in, 'model_dump') else obj_in
         db_obj = self.model(**obj_data)
         self.db.add(db_obj)
         await self.db.commit()
@@ -109,7 +109,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], ABC
         obj_in: Union[UpdateSchemaType, Dict[str, Any]]
     ) -> ModelType:
         """Update an existing record"""
-        obj_data = obj_in.dict(exclude_unset=True) if hasattr(obj_in, 'dict') else obj_in
+        obj_data = obj_in.model_dump(exclude_unset=True) if hasattr(obj_in, 'model_dump') else obj_in
 
         for field, value in obj_data.items():
             if hasattr(db_obj, field):
@@ -221,7 +221,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType], ABC
         """Create multiple records at once"""
         db_objs = []
         for obj_in in objs_in:
-            obj_data = obj_in.dict() if hasattr(obj_in, 'dict') else obj_in
+            obj_data = obj_in.model_dump() if hasattr(obj_in, 'model_dump') else obj_in
             db_obj = self.model(**obj_data)
             db_objs.append(db_obj)
 

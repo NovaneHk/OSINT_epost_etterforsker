@@ -12,6 +12,22 @@ export interface APIResponse<T> {
   message?: string;
 }
 
+// Investigation types
+export interface Investigation {
+  id: string;
+  email: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  createdAt: string;
+  completedAt?: string;
+  score: number | null;
+  findings: string[];
+  error?: string;
+}
+
+export interface InvestigationsResponse extends APIResponse<Investigation[]> {}
+
+export interface InvestigationResponse extends APIResponse<Investigation> {}
+
 // Lead types
 export interface Lead {
   id: string;
@@ -46,6 +62,17 @@ export interface Lead {
 
 export interface LeadsResponse extends APIResponse<Lead[]> {}
 
+export interface LeadSavedView {
+  id: string;
+  name: string;
+  filters: FilterState;
+  scope?: 'private' | 'role' | 'global';
+  ownerUserId?: string;
+  ownerRole?: string;
+  isDefault?: boolean;
+  createdAt: string;
+}
+
 // Source types
 export interface Source {
   id: string;
@@ -55,6 +82,7 @@ export interface Source {
   description?: string;
   configuration: Record<string, unknown>;
   status: 'active' | 'inactive' | 'error' | 'testing';
+  health?: 'ok' | 'warning' | 'error';
   last_run?: string;
   next_run?: string;
   schedule?: string;
@@ -73,7 +101,7 @@ export interface Run {
   name?: string;
   source_ids: string[];
   filters?: Record<string, unknown>;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled' | 'stopped';
   progress: number;
   leads_found: number;
   leads_processed: number;
@@ -102,9 +130,14 @@ export interface Campaign {
   name: string;
   description?: string;
   filter_criteria: Record<string, unknown>;
-  status: 'draft' | 'active' | 'paused' | 'completed';
+  status: 'draft' | 'active' | 'paused' | 'completed' | 'archived';
   leads_count: number;
   target_count?: number;
+  target_sources?: string[];
+  created_by?: string;
+  started_at?: string;
+  ended_at?: string;
+  progress?: number;
   created_at: string;
   updated_at: string;
 }
@@ -116,6 +149,7 @@ export interface CreateCampaignRequest {
   description?: string;
   filter_criteria: Record<string, unknown>;
   target_count?: number;
+  target_sources?: string[];
 }
 
 // Export types
@@ -124,7 +158,7 @@ export interface Export {
   name: string;
   type: 'csv' | 'xlsx' | 'json';
   filters?: Record<string, unknown>;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'expired';
   file_path?: string;
   file_size?: number;
   leads_count?: number;
@@ -233,6 +267,22 @@ export interface ActivityData {
     leads_found: number;
     api_calls: number;
   }>;
+  leads_timeline?: Array<{ date: string; count: number }>;
+  runs_timeline?: Array<{ date: string; count: number }>;
+  exports_timeline?: Array<{ date: string; count: number }>;
+  campaign_stats?: Array<{ name: string; performance: number }>;
+  sources_distribution?: Array<{ name: string; value: number }>;
+  recent_activity?: Array<{
+    type: string;
+    description: string;
+    timestamp: string;
+    details?: string;
+  }>;
+  top_domains?: Array<{
+    domain: string;
+    count: number;
+    percentage: number;
+  }>;
   source_performance: Array<{
     source_id: string;
     source_name: string;
@@ -309,6 +359,7 @@ export interface LeadFilters {
   tags?: string[];
   date_from?: string;
   date_to?: string;
+  campaign_id?: string;
   page?: number;
   limit?: number;
   sort_by?: string;
@@ -322,6 +373,7 @@ export interface FilterState {
   scoreRange: [number, number];
   sources: string[];
   status?: string;
+  dateRange?: { from: Date; to: Date };
 }
 
 export interface SortState {

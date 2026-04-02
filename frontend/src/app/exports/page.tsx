@@ -10,9 +10,10 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Plus, Download, FileText, Database, Calendar, BarChart3, RefreshCw, Trash2 } from 'lucide-react'
 import { toast } from "sonner"
+import { api } from '@/lib/api'
 
 interface Export {
-  id: number
+  id: string
   name: string
   type: string
   status: string
@@ -54,15 +55,25 @@ export default function ExportsPage() {
     fetchStats()
   }, [])
 
+  const mapExport = (exportItem: any): Export => ({
+    id: String(exportItem.id),
+    name: exportItem.name,
+    type: exportItem.type,
+    status: exportItem.status,
+    filters: JSON.stringify(exportItem.filters || {}),
+    file_path: exportItem.file_path,
+    file_size: exportItem.file_size,
+    leads_count: exportItem.leads_count,
+    progress: Number(exportItem.progress || 0),
+    created_at: exportItem.created_at,
+    completed_at: exportItem.completed_at,
+    expires_at: exportItem.expires_at,
+  })
+
   const fetchExports = async () => {
     try {
-      const response = await fetch('/api/exports')
-      if (response.ok) {
-        const data = await response.json()
-        setExports(data)
-      } else {
-        toast.error('Failed to fetch exports')
-      }
+      const data = await api.getExports()
+      setExports(data.data.map(mapExport))
     } catch (error) {
       console.error('Error fetching exports:', error)
       toast.error('Error loading exports')
@@ -73,11 +84,22 @@ export default function ExportsPage() {
 
   const fetchStats = async () => {
     try {
-      const response = await fetch('/api/exports/stats')
-      if (response.ok) {
-        const data = await response.json()
-        setStats(data)
-      }
+      const data = await api.getExportStatistics()
+      setStats({
+        total_exports: Number(data.total_exports || 0),
+        pending_exports: Number(data.pending_exports || 0),
+        completed_exports: Number(data.completed_exports || 0),
+        failed_exports: Number(data.failed_exports || 0),
+        recent_exports_7d: 0,
+        total_file_size_bytes: Number(data.average_file_size || 0) * Number(data.total_exports || 0),
+        status_breakdown: {
+          pending: Number(data.pending_exports || 0),
+          processing: Number(data.processing_exports || 0),
+          completed: Number(data.completed_exports || 0),
+          failed: Number(data.failed_exports || 0),
+        },
+        type_breakdown: data.popular_formats || {},
+      })
     } catch (error) {
       console.error('Error fetching export stats:', error)
     }
@@ -93,46 +115,30 @@ export default function ExportsPage() {
 
     try {
       setIsCreating(true)
-
-      const response = await fetch('/api/exports', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(newExport),
+      await api.createExport({
+        name: newExport.name,
+        type: newExport.type as 'csv' | 'xlsx' | 'json',
+        filters: JSON.parse(newExport.filters || '{}'),
       })
-
-      if (response.ok) {
-        toast.success('Export created successfully')
-        setShowCreateForm(false)
-        setNewExport({ name: '', type: 'csv', filters: '{}' })
-        fetchExports()
-        fetchStats()
-      } else {
-        const error = await response.text()
-        toast.error(`Failed to create export: ${error}`)
-      }
+      toast.success('Export created successfully')
+      setShowCreateForm(false)
+      setNewExport({ name: '', type: 'csv', filters: '{}' })
+      fetchExports()
+      fetchStats()
     } catch (error) {
       console.error('Error creating export:', error)
-      toast.error('Error creating export')
+      toast.error(error instanceof Error ? error.message : 'Error creating export')
     } finally {
       setIsCreating(false)
     }
   }
 
-  const handleProcessExport = async (exportId: number) => {
+  const handleProcessExport = async (exportId: string) => {
     try {
-      const response = await fetch(`/api/exports/${exportId}/process`, {
-        method: 'POST'
-      })
-
-      if (response.ok) {
-        toast.success('Export processing started')
-        fetchExports()
-        fetchStats()
-      } else {
-        toast.error('Failed to process export')
-      }
+      await api.processExport(exportId)
+      toast.success('Export processing started')
+      fetchExports()
+      fetchStats()
     } catch (error) {
       console.error('Error processing export:', error)
       toast.error('Error processing export')
@@ -141,39 +147,24 @@ export default function ExportsPage() {
 
   const handleDownloadExport = async (exportItem: Export) => {
     try {
-      const response = await fetch(`/api/exports/${exportItem.id}/download`)
-
-      if (response.ok) {
-        const data = await response.json()
-        toast.success('Download link generated')
-        // In a real implementation, this would trigger a file download
-        console.log('Download info:', data)
-      } else {
-        toast.error('Failed to download export')
-      }
+      await api.downloadExport(exportItem.id, `${exportItem.name}.${exportItem.type}`)
+      toast.success('Download started')
     } catch (error) {
       console.error('Error downloading export:', error)
       toast.error('Error downloading export')
     }
   }
 
-  const handleDeleteExport = async (exportId: number) => {
+  const handleDeleteExport = async (exportId: string) => {
     if (!confirm('Are you sure you want to delete this export?')) {
       return
     }
 
     try {
-      const response = await fetch(`/api/exports/${exportId}`, {
-        method: 'DELETE'
-      })
-
-      if (response.ok) {
-        toast.success('Export deleted successfully')
-        fetchExports()
-        fetchStats()
-      } else {
-        toast.error('Failed to delete export')
-      }
+      await api.deleteExport(exportId)
+      toast.success('Export deleted successfully')
+      fetchExports()
+      fetchStats()
     } catch (error) {
       console.error('Error deleting export:', error)
       toast.error('Error deleting export')
@@ -344,14 +335,15 @@ export default function ExportsPage() {
 
         <TabsContent value="all" className="space-y-4">
           {isLoading ? (
-            <div className="text-center py-8">Loading exports...</div>
+            <div className="text-center py-8">Laster eksporter...</div>
           ) : exports.length === 0 ? (
             <Card>
-              <CardContent className="text-center py-8">
-                <p className="text-muted-foreground mb-4">No exports found</p>
+              <CardContent className="text-center py-16">
+                <p className="text-4xl mb-4">📦</p>
+                <p className="text-muted-foreground mb-4">Ingen eksporter ennå</p>
                 <Button onClick={() => setShowCreateForm(true)}>
                   <Plus className="h-4 w-4 mr-2" />
-                  Create your first export
+                  Opprett din første eksport
                 </Button>
               </CardContent>
             </Card>

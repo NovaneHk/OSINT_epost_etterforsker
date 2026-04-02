@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Plus, Search, Play, Pause, Edit, Trash2, Copy, Settings, BookOpen, Zap, ArrowRight, Clock, CheckCircle2, AlertCircle, MoreHorizontal } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Plus, Search, Play, Edit, Trash2, Copy, BookOpen, ArrowRight, MoreHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,13 +12,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Progress } from '@/components/ui/progress';
-import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/components/ui/use-toast';
 import { formatRelativeTime, formatNumber } from '@/lib/utils';
+import { api } from '@/lib/api';
 import type { Playbook, PlaybookStep } from '@/types/api';
 
 interface PlaybookFormData {
@@ -85,57 +85,8 @@ const STEP_TYPES = [
   },
 ] as const;
 
-// Mock data for demonstration
-const mockPlaybooks: Playbook[] = [
-  {
-    id: '1',
-    name: 'LinkedIn Lead Discovery',
-    description: 'Automatisert prosess for å finne og validere LinkedIn leads',
-    steps: [
-      { id: '1', type: 'data_collection', configuration: { source: 'linkedin', keywords: ['CTO', 'CEO'] }, order: 1 },
-      { id: '2', type: 'validation', configuration: { verify_email: true, check_linkedin: true }, order: 2 },
-      { id: '3', type: 'enrichment', configuration: { company_data: true, contact_info: true }, order: 3 },
-      { id: '4', type: 'export', configuration: { format: 'csv', include_fields: ['name', 'email', 'company'] }, order: 4 },
-    ],
-    status: 'active',
-    runs_count: 24,
-    success_rate: 85.5,
-    created_at: '2024-01-15T10:00:00Z',
-    updated_at: '2024-01-20T14:30:00Z',
-  },
-  {
-    id: '2',
-    name: 'Email Verification Workflow',
-    description: 'Verifiser e-postadresser og oppdater lead-status',
-    steps: [
-      { id: '1', type: 'validation', configuration: { email_verification: true, domain_check: true }, order: 1 },
-      { id: '2', type: 'filter', configuration: { min_confidence: 70, verified_only: true }, order: 2 },
-      { id: '3', type: 'notification', configuration: { email: 'admin@company.com', template: 'verification_complete' }, order: 3 },
-    ],
-    status: 'active',
-    runs_count: 156,
-    success_rate: 92.3,
-    created_at: '2024-01-10T08:00:00Z',
-    updated_at: '2024-01-22T16:45:00Z',
-  },
-  {
-    id: '3',
-    name: 'Weekly Lead Report',
-    description: 'Generer ukentlig rapport over nye leads',
-    steps: [
-      { id: '1', type: 'filter', configuration: { date_range: 'last_week', verified_only: true }, order: 1 },
-      { id: '2', type: 'export', configuration: { format: 'xlsx', include_stats: true }, order: 2 },
-      { id: '3', type: 'notification', configuration: { slack_webhook: true, email_report: true }, order: 3 },
-    ],
-    status: 'active',
-    runs_count: 8,
-    success_rate: 100,
-    created_at: '2024-01-05T12:00:00Z',
-    updated_at: '2024-01-21T09:15:00Z',
-  },
-];
-
 export default function PlaybooksPage() {
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -151,8 +102,90 @@ export default function PlaybooksPage() {
 
   const { toast } = useToast();
 
-  // Use mock data for now
-  const playbooks = mockPlaybooks;
+  const {
+    data: playbooksResponse,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ['playbooks'],
+    queryFn: () => api.getPlaybooks(),
+  });
+
+  const createPlaybookMutation = useMutation({
+    mutationFn: () => api.createPlaybook({
+      name: formData.name.trim(),
+      description: formData.description.trim() || undefined,
+      steps: formData.steps.map((step, index) => ({
+        type: step.type,
+        configuration: step.configuration,
+        order: index + 1,
+      })),
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['playbooks'] });
+      setIsCreateDialogOpen(false);
+      resetForm();
+      toast({
+        title: 'Playbook opprettet',
+        description: 'Den nye playbook-en har blitt lagt til systemet.',
+      });
+    },
+    onError: (mutationError: Error) => {
+      toast({
+        title: 'Kunne ikke opprette playbook',
+        description: mutationError.message || 'En feil oppstod. Prøv igjen.',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const deletePlaybookMutation = useMutation({
+    mutationFn: (playbookId: string) => api.deletePlaybook(playbookId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['playbooks'] });
+      setIsDeleteDialogOpen(false);
+      setPlaybookToDelete(null);
+      toast({
+        title: 'Playbook slettet',
+        description: 'Playbook-en har blitt fjernet fra systemet.',
+      });
+    },
+    onError: (mutationError: Error) => {
+      toast({
+        title: 'Kunne ikke slette playbook',
+        description: mutationError.message || 'En feil oppstod. Prøv igjen.',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const duplicatePlaybookMutation = useMutation({
+    mutationFn: (playbook: Playbook) => api.createPlaybook({
+      name: `${playbook.name} (kopi)`,
+      description: playbook.description,
+      steps: playbook.steps.map((step, index) => ({
+        type: step.type,
+        configuration: step.configuration,
+        order: index + 1,
+      })),
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['playbooks'] });
+      toast({
+        title: 'Playbook duplisert',
+        description: 'Kopien er opprettet i databasen.',
+      });
+    },
+    onError: (mutationError: Error) => {
+      toast({
+        title: 'Kunne ikke duplisere playbook',
+        description: mutationError.message || 'En feil oppstod. Prøv igjen.',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const playbooks = playbooksResponse?.data || [];
 
   // Filter playbooks
   const filteredPlaybooks = playbooks.filter(playbook => {
@@ -164,22 +197,7 @@ export default function PlaybooksPage() {
   });
 
   const handleCreatePlaybook = async () => {
-    try {
-      // Mock API call
-      console.log('Creating playbook:', formData);
-      setIsCreateDialogOpen(false);
-      resetForm();
-      toast({
-        title: 'Playbook opprettet',
-        description: 'Den nye playbook-en har blitt lagt til systemet.',
-      });
-    } catch (error) {
-      toast({
-        title: 'Kunne ikke opprette playbook',
-        description: 'En feil oppstod. Prøv igjen.',
-        variant: 'destructive',
-      });
-    }
+    await createPlaybookMutation.mutateAsync();
   };
 
   const resetForm = () => {
@@ -278,56 +296,18 @@ export default function PlaybooksPage() {
   const handleDeletePlaybook = async () => {
     if (!playbookToDelete) return;
 
-    try {
-      // Mock API call
-      console.log('Deleting playbook:', playbookToDelete.id);
-      setIsDeleteDialogOpen(false);
-      setPlaybookToDelete(null);
-      toast({
-        title: 'Playbook slettet',
-        description: 'Playbook-en har blitt fjernet fra systemet.',
-      });
-    } catch (error) {
-      toast({
-        title: 'Kunne ikke slette playbook',
-        description: 'En feil oppstod. Prøv igjen.',
-        variant: 'destructive',
-      });
-    }
+    await deletePlaybookMutation.mutateAsync(playbookToDelete.id);
   };
 
   const handleRunPlaybook = async (playbook: Playbook) => {
-    try {
-      // Mock API call
-      console.log('Running playbook:', playbook.id);
-      toast({
-        title: 'Playbook startet',
-        description: `"${playbook.name}" kjører nå...`,
-      });
-    } catch (error) {
-      toast({
-        title: 'Kunne ikke starte playbook',
-        description: 'En feil oppstod. Prøv igjen.',
-        variant: 'destructive',
-      });
-    }
+    toast({
+      title: 'Kjøring ikke tilgjengelig ennå',
+      description: `"${playbook.name}" er lagret, men runtime-kjøring av playbooks er ikke implementert ennå.`,
+    });
   };
 
   const handleDuplicatePlaybook = async (playbook: Playbook) => {
-    try {
-      // Mock API call
-      console.log('Duplicating playbook:', playbook.id);
-      toast({
-        title: 'Playbook duplisert',
-        description: `Kopi av "${playbook.name}" er opprettet.`,
-      });
-    } catch (error) {
-      toast({
-        title: 'Kunne ikke duplisere playbook',
-        description: 'En feil oppstod. Prøv igjen.',
-        variant: 'destructive',
-      });
-    }
+    await duplicatePlaybookMutation.mutateAsync(playbook);
   };
 
   return (
@@ -504,9 +484,9 @@ export default function PlaybooksPage() {
               </Button>
               <Button
                 onClick={handleCreatePlaybook}
-                disabled={!formData.name.trim() || formData.steps.length === 0}
+                disabled={!formData.name.trim() || formData.steps.length === 0 || createPlaybookMutation.isPending}
               >
-                Opprett playbook
+                {createPlaybookMutation.isPending ? 'Oppretter...' : 'Opprett playbook'}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -536,6 +516,16 @@ export default function PlaybooksPage() {
           </SelectContent>
         </Select>
       </div>
+
+      {isLoading && (
+        <div className="text-sm text-muted-foreground">Laster playbooks...</div>
+      )}
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          Kunne ikke laste playbooks fra backend. Prøv igjen.
+        </div>
+      )}
 
       {/* Playbooks Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -759,9 +749,10 @@ export default function PlaybooksPage() {
             <AlertDialogCancel>Avbryt</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeletePlaybook}
+              disabled={deletePlaybookMutation.isPending}
               className="bg-red-600 hover:bg-red-700"
             >
-              Slett
+              {deletePlaybookMutation.isPending ? 'Sletter...' : 'Slett'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

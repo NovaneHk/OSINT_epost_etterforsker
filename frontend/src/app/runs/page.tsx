@@ -1,19 +1,19 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Plus, Play, StopCircle, BarChart3, Clock, CheckCircle, AlertCircle, Search, Users, Eye } from 'lucide-react'
 import { toast } from "sonner"
+import { api } from '@/lib/api'
 
 interface Run {
-  id: number
+  id: string
   name: string
   type: string
   status: string
@@ -47,6 +47,7 @@ interface RunResults {
   leads_found: any[]
   leads_count: number
   sources_used: number[]
+  message?: string
   summary: {
     total_leads: number
     high_confidence: number
@@ -66,25 +67,95 @@ export default function RunsPage() {
   const [newRun, setNewRun] = useState({
     name: '',
     type: 'manual',
-    search_terms: '{}',
-    filters: '{}'
+    target_domains: '',   // comma-separated domains e.g. "acme.com, example.no"
+    keywords: '',         // comma-separated keywords
+    max_results: '100',
   })
   const [isCreating, setIsCreating] = useState(false)
+
+  const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     fetchRuns()
     fetchStats()
   }, [])
 
+  // WebSocket: receive run_completed / run_failed broadcasts and refresh immediately
+  useEffect(() => {
+    const wsUrl = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000')
+      .replace(/^http/, 'ws') + '/api/ws/notifications';
+    const connect = () => {
+      try {
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+        ws.onmessage = (evt) => {
+          try {
+            const msg = JSON.parse(evt.data);
+            if (msg.type === 'run_completed' || msg.type === 'run_failed') {
+              fetchRuns();
+              fetchStats();
+            }
+          } catch { /* ignore parse errors */ }
+        };
+        ws.onclose = () => {
+          // reconnect after 5s if page is still mounted
+          setTimeout(() => { if (wsRef.current === ws) connect(); }, 5000);
+        };
+      } catch { /* WebSocket not available (SSR) */ }
+    };
+    connect();
+    return () => {
+      const ws = wsRef.current;
+      wsRef.current = null;
+      ws?.close();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Poll every 5 seconds while any run is active (fallback if WS unavailable)
+  useEffect(() => {
+    const hasActive = runs.some(r => r.status === 'running' || r.status === 'pending');
+    if (hasActive) {
+      if (!pollerRef.current) {
+        pollerRef.current = setInterval(() => {
+          fetchRuns();
+        }, 5000);
+      }
+    } else {
+      if (pollerRef.current) {
+        clearInterval(pollerRef.current);
+        pollerRef.current = null;
+      }
+    }
+    return () => {
+      if (pollerRef.current) {
+        clearInterval(pollerRef.current);
+        pollerRef.current = null;
+      }
+    };
+  }, [runs]);
+
+  const mapRun = (run: any): Run => ({
+    id: String(run.id),
+    name: run.name || `Run ${run.id}`,
+    type: String(run.configuration?.run_type || 'manual'),
+    sources: JSON.stringify(run.source_ids || []),
+    search_terms: JSON.stringify(run.configuration?.search_terms || {}),
+    filters: JSON.stringify(run.filters || {}),
+    status: run.status,
+    leads_found: Number(run.leads_found || 0),
+    progress: Number(run.progress || 0),
+    error_message: run.error_message,
+    created_at: run.created_at,
+    started_at: run.started_at,
+    completed_at: run.completed_at,
+  })
+
   const fetchRuns = async () => {
     try {
-      const response = await fetch('/api/runs')
-      if (response.ok) {
-        const data = await response.json()
-        setRuns(data)
-      } else {
-        toast.error('Failed to fetch runs')
-      }
+      const data = await api.getRuns()
+      setRuns(data.data.map(mapRun))
     } catch (error) {
       console.error('Error fetching runs:', error)
       toast.error('Error loading runs')
@@ -95,25 +166,48 @@ export default function RunsPage() {
 
   const fetchStats = async () => {
     try {
-      const response = await fetch('/api/runs/stats')
-      if (response.ok) {
-        const data = await response.json()
-        setStats(data)
-      }
+      const data = await api.getRunStatistics()
+      setStats({
+        total_runs: Number(data.total_runs || 0),
+        pending_runs: Number(data.pending_runs || 0),
+        running_runs: Number(data.running_runs || 0),
+        completed_runs: Number(data.completed_runs || 0),
+        failed_runs: Number(data.failed_runs || 0),
+        success_rate_percent: Math.round(Number(data.success_rate || 0) * 100),
+        total_leads_found: Number(data.total_leads_found || 0),
+        recent_runs_7d: 0,
+        avg_duration_minutes: Number(data.average_duration_seconds || 0) / 60,
+        status_breakdown: {
+          pending: Number(data.pending_runs || 0),
+          running: Number(data.running_runs || 0),
+          completed: Number(data.completed_runs || 0),
+          failed: Number(data.failed_runs || 0),
+          cancelled: Number(data.cancelled_runs || 0),
+        },
+        type_breakdown: data.runs_by_type || {},
+      })
     } catch (error) {
       console.error('Error fetching run stats:', error)
     }
   }
 
-  const fetchRunResults = async (runId: number) => {
+  const fetchRunResults = async (runId: string) => {
     try {
-      const response = await fetch(`/api/runs/${runId}/results`)
-      if (response.ok) {
-        const data = await response.json()
-        setRunResults(data)
-      } else {
-        toast.error('Failed to fetch run results')
-      }
+      const data = await api.getRunResults(runId)
+      setRunResults({
+        run_info: selectedRun || runs.find((run) => run.id === runId) || mapRun({ id: runId, name: `Run ${runId}`, status: 'completed', progress: 100, leads_found: 0, created_at: new Date().toISOString() }),
+        leads_found: Array.isArray(data.results) ? data.results : [],
+        leads_count: Number(data.total || 0),
+        sources_used: [],
+        message: typeof data.message === 'string' ? data.message : undefined,
+        summary: {
+          total_leads: Number(data.total || 0),
+          high_confidence: 0,
+          verified_emails: 0,
+          unique_companies: 0,
+          avg_confidence: 0,
+        },
+      })
     } catch (error) {
       console.error('Error fetching run results:', error)
       toast.error('Error loading run results')
@@ -128,67 +222,61 @@ export default function RunsPage() {
       return
     }
 
+    const domains = newRun.target_domains
+      .split(',')
+      .map(d => d.trim())
+      .filter(Boolean)
+    const keywords = newRun.keywords
+      .split(',')
+      .map(k => k.trim())
+      .filter(Boolean)
+
     try {
       setIsCreating(true)
-
-      const response = await fetch('/api/runs', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      await api.createRun({
+        name: newRun.name,
+        source_ids: [],
+        filters: {},
+        configuration: {
+          run_type: newRun.type,
+          max_results: parseInt(newRun.max_results) || 100,
+          search_terms: {
+            domains,
+            keywords,
+          },
         },
-        body: JSON.stringify(newRun),
       })
-
-      if (response.ok) {
-        toast.success('Run created successfully')
-        setShowCreateForm(false)
-        setNewRun({ name: '', type: 'manual', search_terms: '{}', filters: '{}' })
-        fetchRuns()
-        fetchStats()
-      } else {
-        const error = await response.text()
-        toast.error(`Failed to create run: ${error}`)
-      }
+      toast.success('Kjøring opprettet')
+      setShowCreateForm(false)
+      setNewRun({ name: '', type: 'manual', target_domains: '', keywords: '', max_results: '100' })
+      fetchRuns()
+      fetchStats()
     } catch (error) {
       console.error('Error creating run:', error)
-      toast.error('Error creating run')
+      toast.error(error instanceof Error ? error.message : 'Kunne ikke opprette kjøring')
     } finally {
       setIsCreating(false)
     }
   }
 
-  const handleStartRun = async (runId: number) => {
+  const handleStartRun = async (runId: string) => {
     try {
-      const response = await fetch(`/api/runs/${runId}/start`, {
-        method: 'POST'
-      })
-
-      if (response.ok) {
-        toast.success('Run started successfully')
-        fetchRuns()
-        fetchStats()
-      } else {
-        toast.error('Failed to start run')
-      }
+      await api.startRun(runId)
+      toast.success('Run started successfully')
+      fetchRuns()
+      fetchStats()
     } catch (error) {
       console.error('Error starting run:', error)
       toast.error('Error starting run')
     }
   }
 
-  const handleStopRun = async (runId: number) => {
+  const handleStopRun = async (runId: string) => {
     try {
-      const response = await fetch(`/api/runs/${runId}/stop`, {
-        method: 'POST'
-      })
-
-      if (response.ok) {
-        toast.success('Run stopped successfully')
-        fetchRuns()
-        fetchStats()
-      } else {
-        toast.error('Failed to stop run')
-      }
+      await api.stopRun(runId)
+      toast.success('Run stopped successfully')
+      fetchRuns()
+      fetchStats()
     } catch (error) {
       console.error('Error stopping run:', error)
       toast.error('Error stopping run')
@@ -309,6 +397,9 @@ export default function RunsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Found Leads ({runResults.leads_count})</CardTitle>
+            {runResults.message && (
+              <CardDescription>{runResults.message}</CardDescription>
+            )}
           </CardHeader>
           <CardContent>
             {runResults.leads_found.length === 0 ? (
@@ -457,25 +548,39 @@ export default function RunsPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="search-terms">Search Terms (JSON)</Label>
-                <Textarea
-                  id="search-terms"
-                  value={newRun.search_terms}
-                  onChange={(e) => setNewRun(prev => ({ ...prev, search_terms: e.target.value }))}
-                  placeholder='{"keywords": ["software", "tech"], "companies": ["startup"]}'
-                  rows={3}
+                <Label htmlFor="target-domains">Måldomener</Label>
+                <Input
+                  id="target-domains"
+                  value={newRun.target_domains}
+                  onChange={(e) => setNewRun(prev => ({ ...prev, target_domains: e.target.value }))}
+                  placeholder="acme.com, example.no, company.org"
                 />
+                <p className="text-xs text-muted-foreground">Kommaseparerte domener som skal søkes gjennom</p>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="filters">Filters (JSON)</Label>
-                <Textarea
-                  id="filters"
-                  value={newRun.filters}
-                  onChange={(e) => setNewRun(prev => ({ ...prev, filters: e.target.value }))}
-                  placeholder='{"location": "San Francisco", "industry": "Technology"}'
-                  rows={3}
-                />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="keywords">Nøkkelord (valgfritt)</Label>
+                  <Input
+                    id="keywords"
+                    value={newRun.keywords}
+                    onChange={(e) => setNewRun(prev => ({ ...prev, keywords: e.target.value }))}
+                    placeholder="CTO, ingeniør, procurement"
+                  />
+                  <p className="text-xs text-muted-foreground">Kommaseparerte nøkkelord for filtrering</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="max-results">Maks resultater</Label>
+                  <Input
+                    id="max-results"
+                    type="number"
+                    min={1}
+                    max={1000}
+                    value={newRun.max_results}
+                    onChange={(e) => setNewRun(prev => ({ ...prev, max_results: e.target.value }))}
+                  />
+                </div>
               </div>
 
               <div className="flex space-x-2">
@@ -506,14 +611,15 @@ export default function RunsPage() {
 
         <TabsContent value="all" className="space-y-4">
           {isLoading ? (
-            <div className="text-center py-8">Loading runs...</div>
+            <div className="text-center py-8">Laster kjøringer...</div>
           ) : runs.length === 0 ? (
             <Card>
-              <CardContent className="text-center py-8">
-                <p className="text-muted-foreground mb-4">No runs found</p>
+              <CardContent className="text-center py-16">
+                <p className="text-4xl mb-4">🔍</p>
+                <p className="text-muted-foreground mb-4">Ingen kjøringer ennå</p>
                 <Button onClick={() => setShowCreateForm(true)}>
                   <Plus className="h-4 w-4 mr-2" />
-                  Create your first run
+                  Start din første kjøring
                 </Button>
               </CardContent>
             </Card>

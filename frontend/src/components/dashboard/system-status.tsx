@@ -67,7 +67,7 @@ export function SystemStatus() {
     return <SystemStatusSkeleton />;
   }
 
-  const systemHealth = health?.status || 'unhealthy';
+  const systemHealth = health?.data?.status || 'unhealthy';
   const sourcesData = sources?.data || [];
   const runsData = activeRuns?.data || [];
 
@@ -93,12 +93,12 @@ export function SystemStatus() {
             <div className="mt-3 space-y-1">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">CLI tilgjengelig</span>
-                <span className={health.cli_available ? 'text-green-600' : 'text-red-600'}>
-                  {health.cli_available ? 'Ja' : 'Nei'}
+                <span className={health?.data?.services?.database?.status === 'up' ? 'text-green-600' : 'text-red-600'}>
+                  {health?.data?.services?.database?.status === 'up' ? 'Ja' : 'Nei'}
                 </span>
               </div>
               <div className="text-xs text-muted-foreground">
-                Sist sjekket: {formatDate(new Date(health.timestamp), 'long')}
+                Sist sjekket: {health?.data?.timestamp ? formatDate(new Date(health.data.timestamp), 'long') : 'Ukjent'}
               </div>
             </div>
           )}
@@ -128,13 +128,13 @@ export function SystemStatus() {
               </div>
               <div className="text-center">
                 <div className="text-yellow-600 font-medium">
-                  {sourcesData.filter(s => s.health === 'warn').length}
+                  {sourcesData.filter(s => s.health === 'warning').length}
                 </div>
                 <div className="text-muted-foreground">Advarsler</div>
               </div>
               <div className="text-center">
                 <div className="text-red-600 font-medium">
-                  {sourcesData.filter(s => s.health === 'down').length}
+                  {sourcesData.filter(s => s.health === 'error').length}
                 </div>
                 <div className="text-muted-foreground">Nede</div>
               </div>
@@ -160,7 +160,7 @@ export function SystemStatus() {
                       <span className="font-medium">#{run.id.slice(0, 8)}</span>
                     </div>
                     <div className="text-muted-foreground">
-                      {run.startedAt && formatDate(new Date(run.startedAt), 'short')}
+                      {run.started_at && formatDate(new Date(run.started_at), 'short')}
                     </div>
                   </div>
                 ))}

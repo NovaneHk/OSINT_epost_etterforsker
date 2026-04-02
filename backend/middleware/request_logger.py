@@ -1,13 +1,16 @@
 """
 Request Logger Middleware
-Logs incoming requests and responses for monitoring and debugging
+Logs incoming requests and responses for monitoring and debugging.
+Writes mutating requests (POST/PUT/DELETE/PATCH) to the audit_log DB table.
 """
 
 import time
 import logging
 import json
+import asyncio
 from typing import Callable
 from datetime import datetime
+from uuid import uuid4
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -17,6 +20,8 @@ from backend.core.config import get_settings
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+
+_AUDIT_METHODS = {"POST", "PUT", "DELETE", "PATCH"}
 
 
 class RequestLoggerMiddleware(BaseHTTPMiddleware):
@@ -78,6 +83,12 @@ class RequestLoggerMiddleware(BaseHTTPMiddleware):
         # Log response
         if request.url.path not in self.exclude_paths:
             await self._log_response(request, response, request_id, processing_time)
+
+        # Async audit log write for mutating requests
+        if request.method in _AUDIT_METHODS:
+            asyncio.create_task(
+                self._write_audit_log(request, response, request_id)
+            )
 
         return response
 
@@ -216,6 +227,40 @@ class RequestLoggerMiddleware(BaseHTTPMiddleware):
                 safe_headers[key] = value
 
         return safe_headers
+
+    async def _write_audit_log(self, request: Request, response: Response, request_id: str):
+        """Persist an audit log entry to the DB (fire-and-forget, never raises)."""
+        try:
+            # Try to extract user_id from JWT in Authorization header
+            user_id: str | None = None
+            auth_header = request.headers.get("authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+                try:
+                    from backend.core.security import jwt_manager
+                    td = jwt_manager.decode_token(token)
+                    user_id = td.sub
+                except Exception:
+                    pass
+
+            ip = self._get_client_ip(request)
+            from backend.core.database import db_manager
+            db_manager.execute_write(
+                """INSERT OR IGNORE INTO audit_log
+                   (id, user_id, action, resource_path, method, status_code, ip_address, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                (
+                    str(uuid4()),
+                    user_id,
+                    f"{request.method} {request.url.path}",
+                    request.url.path,
+                    request.method,
+                    response.status_code,
+                    ip,
+                ),
+            )
+        except Exception as exc:
+            logger.debug("Audit log write failed: %s", exc)
 
     def _get_client_ip(self, request: Request) -> str:
         """Extract client IP address"""

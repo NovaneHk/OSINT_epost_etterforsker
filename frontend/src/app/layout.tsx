@@ -8,9 +8,9 @@ import { ToastProvider } from '@/components/providers/toast-provider';
 import { KeyboardShortcutsProvider } from '@/components/providers/keyboard-shortcuts-provider';
 import { ErrorProvider } from '@/components/providers/error-boundary';
 import { LoadingProvider } from '@/components/providers/loading-provider';
-import { SidebarNav } from '@/components/layout/sidebar-nav';
-import { TopNav } from '@/components/layout/top-nav';
-import { FloatingActions } from '@/components/layout/floating-actions';
+import { AuthBootstrap } from '@/components/providers/auth-bootstrap';
+import { AppShell } from '@/components/layout/app-shell';
+import { GdprBanner } from '@/components/GdprBanner';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -84,35 +84,11 @@ export default function RootLayout({ children }: RootLayoutProps) {
             <ErrorProvider>
               <LoadingProvider>
                 <QueryProvider>
+                  <AuthBootstrap />
                   <KeyboardShortcutsProvider>
-                  <div className="min-h-screen bg-background">
-                    {/* Main Layout */}
-                    <div className="flex h-screen">
-                      {/* Sidebar */}
-                      <aside className="hidden w-64 border-r border-border bg-card lg:block">
-                        <SidebarNav />
-                      </aside>
-
-                      {/* Main Content Area */}
-                      <div className="flex flex-1 flex-col overflow-hidden">
-                        {/* Top Navigation */}
-                        <header className="border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-                          <TopNav />
-                        </header>
-
-                        {/* Page Content */}
-                        <main className="flex-1 overflow-auto">
-                          <div className="container mx-auto px-4 py-6">
-                            {children}
-                          </div>
-                        </main>
-                      </div>
-                    </div>
-
-                    {/* Floating Actions */}
-                    <FloatingActions />
-                  </div>
+                    <AppShell>{children}</AppShell>
                     <ToastProvider />
+                    <GdprBanner />
                   </KeyboardShortcutsProvider>
                 </QueryProvider>
               </LoadingProvider>

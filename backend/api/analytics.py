@@ -8,11 +8,15 @@ from typing import Dict, List, Any, Optional
 import asyncio
 import json
 import logging
+import os
+import sqlite3
 from datetime import datetime, timedelta
 from dataclasses import asdict
 
-from ..core.dependencies import get_current_user
+from ..core.dependencies import get_current_active_user as get_current_user
 from ..models.user import User
+from ..core.cache_manager import cache_manager
+from ..core.security import jwt_manager
 
 # Import AI components
 try:
@@ -24,7 +28,40 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/analytics", tags=["analytics"])
+router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+
+def _db_path() -> str:
+    """Return the SQLite DB path used by backend."""
+    from ..core.config import get_settings
+    url = get_settings().DATABASE_URL
+    return url.replace("sqlite://", "") if url.startswith("sqlite://") else "data/osint_cache.db"
+
+
+def _db_scalar(query: str, params: tuple = ()) -> Any:
+    """Execute a single-value query and return the first column of the first row."""
+    try:
+        con = sqlite3.connect(_db_path())
+        con.row_factory = sqlite3.Row
+        cur = con.execute(query, params)
+        row = cur.fetchone()
+        con.close()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
+def _db_rows(query: str, params: tuple = ()) -> List[Dict[str, Any]]:
+    """Execute a query and return all rows as dicts."""
+    try:
+        con = sqlite3.connect(_db_path())
+        con.row_factory = sqlite3.Row
+        cur = con.execute(query, params)
+        rows = [dict(r) for r in cur.fetchall()]
+        con.close()
+        return rows
+    except Exception:
+        return []
 
 # WebSocket connection manager for real-time updates
 class ConnectionManager:
@@ -70,6 +107,15 @@ manager = ConnectionManager()
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time analytics updates"""
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=1008)
+        return
+    try:
+        jwt_manager.decode_token(token)
+    except Exception:
+        await websocket.close(code=1008)
+        return
     await manager.connect(websocket)
     try:
         while True:
@@ -97,6 +143,10 @@ async def websocket_endpoint(websocket: WebSocket):
 async def get_dashboard_overview(current_user: User = Depends(get_current_user)):
     """Get comprehensive dashboard overview data"""
     try:
+        cached = cache_manager.get("analytics:dashboard:overview")
+        if cached is not None:
+            return cached
+
         # Get AI analytics if available
         ai_analytics = {}
         if AI_AVAILABLE:
@@ -135,6 +185,7 @@ async def get_dashboard_overview(current_user: User = Depends(get_current_user))
             "timestamp": datetime.now().isoformat()
         }
 
+        cache_manager.set("analytics:dashboard:overview", dashboard_data, ttl=30)
         return dashboard_data
 
     except Exception as e:
@@ -179,13 +230,18 @@ async def get_performance_metrics_endpoint(current_user: User = Depends(get_curr
         logger.error(f"Error getting performance metrics: {e}")
         raise HTTPException(status_code=500, detail="Failed to get performance metrics")
 
-@router.get("/analytics/trends")
+@router.get("/trends")
 async def get_analytics_trends(
     timeframe: str = "24h",
     current_user: User = Depends(get_current_user)
 ):
     """Get analytics trends over specified timeframe"""
     try:
+        cache_key = f"analytics:trends:{timeframe}"
+        cached = cache_manager.get(cache_key)
+        if cached is not None:
+            return cached
+
         # Parse timeframe
         hours = parse_timeframe(timeframe)
 
@@ -198,13 +254,14 @@ async def get_analytics_trends(
             "timestamp": datetime.now().isoformat()
         }
 
+        cache_manager.set(cache_key, trends_data, ttl=60)
         return trends_data
 
     except Exception as e:
         logger.error(f"Error getting analytics trends: {e}")
         raise HTTPException(status_code=500, detail="Failed to get analytics trends")
 
-@router.post("/analytics/trigger-analysis")
+@router.post("/trigger-analysis")
 async def trigger_manual_analysis(
     data: Dict[str, Any],
     current_user: User = Depends(get_current_user)
@@ -271,24 +328,26 @@ async def get_realtime_analytics():
     }
 
 async def get_total_investigations():
-    """Get total number of investigations"""
-    # Simulate data - in production, query actual database
-    return 1247
+    """Get total number of investigations from DB."""
+    count = _db_scalar("SELECT COUNT(*) FROM investigations")
+    return int(count or 0)
 
 async def get_active_threats():
-    """Get number of active threats"""
-    # Simulate data - in production, query threat database
-    return 23
+    """Get number of in-progress investigations (active threats)."""
+    count = _db_scalar("SELECT COUNT(*) FROM investigations WHERE status IN ('pending','in_progress')")
+    return int(count or 0)
 
 async def get_average_risk_score():
-    """Get average risk score"""
-    # Simulate data - in production, calculate from actual data
-    return 0.34
+    """Get average risk score from contacts/leads confidence scores."""
+    avg = _db_scalar("SELECT AVG(confidence_score) FROM contacts WHERE confidence_score IS NOT NULL")
+    return round(float(avg or 0.0), 2)
 
 async def get_processing_speed():
-    """Get current processing speed (items per minute)"""
-    # Simulate data - in production, calculate from performance metrics
-    return 156
+    """Get processing speed: contacts processed in the last hour."""
+    count = _db_scalar(
+        "SELECT COUNT(*) FROM contacts WHERE created_at >= datetime('now', '-1 hour')"
+    )
+    return int(count or 0)
 
 async def get_system_health():
     """Get overall system health status"""
@@ -321,73 +380,86 @@ async def get_system_health():
     return health_data
 
 async def get_recent_activity():
-    """Get recent system activity"""
-    # Simulate recent activity data
-    return [
-        {
-            "timestamp": (datetime.now() - timedelta(minutes=2)).isoformat(),
-            "type": "threat_detected",
-            "description": "High-risk email detected from suspicious domain",
-            "severity": "high"
-        },
-        {
-            "timestamp": (datetime.now() - timedelta(minutes=5)).isoformat(),
-            "type": "analysis_complete",
-            "description": "Batch analysis completed: 45 emails processed",
-            "severity": "info"
-        },
-        {
-            "timestamp": (datetime.now() - timedelta(minutes=8)).isoformat(),
-            "type": "anomaly_detected",
-            "description": "Unusual pattern detected in email traffic",
-            "severity": "medium"
-        }
-    ]
+    """Get recent system activity from DB (runs + investigations)."""
+    activities = []
+
+    runs = _db_rows(
+        "SELECT name, status, updated_at FROM runs ORDER BY updated_at DESC LIMIT 5"
+    )
+    for r in runs:
+        activities.append({
+            "timestamp": r.get("updated_at") or datetime.now().isoformat(),
+            "type": "run_" + str(r.get("status", "updated")),
+            "description": f"Search run '{r.get('name', '')}' — {r.get('status', '')}",
+            "severity": "info",
+        })
+
+    investigations = _db_rows(
+        "SELECT email, status, updated_at FROM investigations ORDER BY updated_at DESC LIMIT 5"
+    )
+    for inv in investigations:
+        activities.append({
+            "timestamp": inv.get("updated_at") or datetime.now().isoformat(),
+            "type": "investigation_" + str(inv.get("status", "updated")),
+            "description": f"Investigation: {inv.get('email', '')} — {inv.get('status', '')}",
+            "severity": "info",
+        })
+
+    activities.sort(key=lambda x: x["timestamp"], reverse=True)
+    return activities[:10]
 
 async def get_performance_metrics():
-    """Get current performance metrics"""
+    """Get current performance metrics from DB and system."""
+    resources = await get_system_resources()
     return {
-        "api_response_time": "45ms",
-        "database_query_time": "12ms",
-        "ai_processing_time": "89ms",
-        "memory_usage": "68%",
-        "cpu_usage": "34%",
-        "disk_usage": "45%"
+        "api_response_time": "N/A",
+        "database_query_time": "N/A",
+        "ai_processing_time": "N/A",
+        "memory_usage": resources.get("memory_usage", "N/A"),
+        "cpu_usage": resources.get("cpu_usage", "N/A"),
+        "disk_usage": resources.get("disk_usage", "N/A"),
     }
 
 async def get_active_threat_list():
-    """Get list of active threats"""
-    # Simulate active threats
-    return [
-        {
-            "id": "threat_001",
-            "type": "phishing_email",
-            "severity": "high",
-            "source": "suspicious-domain.tk",
-            "detected_at": (datetime.now() - timedelta(minutes=15)).isoformat(),
-            "risk_score": 0.89
-        },
-        {
-            "id": "threat_002",
-            "type": "domain_reputation",
-            "severity": "medium",
-            "source": "example-bad.com",
-            "detected_at": (datetime.now() - timedelta(minutes=32)).isoformat(),
-            "risk_score": 0.67
-        }
-    ]
+    """Get list of active (pending/in_progress) investigations as threats."""
+    rows = _db_rows(
+        "SELECT id, email, status, score, created_at FROM investigations "
+        "WHERE status IN ('pending','in_progress') ORDER BY created_at DESC LIMIT 20"
+    )
+    threats = []
+    for r in rows:
+        score = float(r.get("score") or 0.5)
+        severity = "critical" if score >= 0.9 else "high" if score >= 0.7 else "medium" if score >= 0.4 else "low"
+        threats.append({
+            "id": str(r.get("id", "")),
+            "type": "email_investigation",
+            "severity": severity,
+            "source": r.get("email", ""),
+            "detected_at": r.get("created_at") or datetime.now().isoformat(),
+            "risk_score": score,
+        })
+    return threats
 
 async def get_threat_trends():
-    """Get threat trend data"""
-    # Simulate trend data
+    """Get threat detection counts per hour for the last 12 hours."""
+    hourly = []
+    for h in range(11, -1, -1):
+        count = _db_scalar(
+            "SELECT COUNT(*) FROM investigations "
+            "WHERE created_at >= datetime('now', ? || ' hours') "
+            "AND created_at < datetime('now', ? || ' hours')",
+            (f"-{h+1}", f"-{h}"),
+        )
+        hourly.append(int(count or 0))
+
+    type_rows = _db_rows(
+        "SELECT status, COUNT(*) AS cnt FROM investigations GROUP BY status"
+    )
+    threat_types: Dict[str, int] = {r["status"]: r["cnt"] for r in type_rows}
+
     return {
-        "hourly_detections": [12, 8, 15, 23, 18, 9, 14, 19, 25, 16, 11, 20],
-        "threat_types": {
-            "phishing": 45,
-            "malware": 23,
-            "suspicious_domain": 67,
-            "data_breach": 12
-        }
+        "hourly_detections": hourly,
+        "threat_types": threat_types,
     }
 
 async def get_threat_geography():
@@ -403,41 +475,54 @@ async def get_threat_geography():
     }
 
 async def get_threat_severity_breakdown():
-    """Get breakdown of threats by severity"""
-    return {
-        "critical": 5,
-        "high": 18,
-        "medium": 34,
-        "low": 67
-    }
+    """Get breakdown of investigations by risk score band."""
+    rows = _db_rows("SELECT score FROM investigations WHERE score IS NOT NULL")
+    breakdown = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    for r in rows:
+        s = float(r.get("score") or 0)
+        if s >= 0.9:
+            breakdown["critical"] += 1
+        elif s >= 0.7:
+            breakdown["high"] += 1
+        elif s >= 0.4:
+            breakdown["medium"] += 1
+        else:
+            breakdown["low"] += 1
+    return breakdown
 
 async def get_recent_threat_detections():
-    """Get recent threat detections"""
-    return [
-        {
-            "timestamp": (datetime.now() - timedelta(minutes=3)).isoformat(),
-            "threat_type": "phishing_email",
-            "source": "malicious@fake-bank.tk",
-            "risk_score": 0.92,
-            "severity": "critical"
-        },
-        {
-            "timestamp": (datetime.now() - timedelta(minutes=7)).isoformat(),
-            "threat_type": "suspicious_domain",
-            "source": "suspicious-site.ml",
-            "risk_score": 0.78,
-            "severity": "high"
-        }
-    ]
+    """Get recent completed investigations sorted by score."""
+    rows = _db_rows(
+        "SELECT email, score, status, updated_at FROM investigations "
+        "ORDER BY updated_at DESC LIMIT 10"
+    )
+    result = []
+    for r in rows:
+        score = float(r.get("score") or 0.5)
+        severity = "critical" if score >= 0.9 else "high" if score >= 0.7 else "medium" if score >= 0.4 else "low"
+        result.append({
+            "timestamp": r.get("updated_at") or datetime.now().isoformat(),
+            "threat_type": "email_investigation",
+            "source": r.get("email", ""),
+            "risk_score": score,
+            "severity": severity,
+        })
+    return result
 
 async def get_processing_performance():
-    """Get processing performance metrics"""
+    """Get processing stats from actual run + contact data."""
+    completed_last_hour = _db_scalar(
+        "SELECT COUNT(*) FROM contacts WHERE created_at >= datetime('now', '-1 hour')"
+    ) or 0
+    total_runs = _db_scalar("SELECT COUNT(*) FROM runs") or 0
+    completed_runs = _db_scalar("SELECT COUNT(*) FROM runs WHERE status = 'completed'") or 0
+    success_rate = f"{round((completed_runs / total_runs * 100), 1)}%" if total_runs else "N/A"
     return {
-        "emails_per_minute": 156,
-        "domains_per_minute": 89,
-        "average_processing_time": "67ms",
-        "queue_size": 23,
-        "success_rate": "99.2%"
+        "emails_per_minute": round(float(completed_last_hour) / 60, 1),
+        "domains_per_minute": 0,
+        "average_processing_time": "N/A",
+        "queue_size": int(_db_scalar("SELECT COUNT(*) FROM runs WHERE status = 'pending'") or 0),
+        "success_rate": success_rate,
     }
 
 async def get_ai_model_performance():
@@ -465,40 +550,58 @@ async def get_ai_model_performance():
     }
 
 async def get_system_resources():
-    """Get system resource usage"""
-    return {
-        "cpu_usage": "34%",
-        "memory_usage": "68%",
-        "disk_usage": "45%",
-        "network_io": "12.3 MB/s",
-        "disk_io": "8.7 MB/s"
-    }
+    """Get real system resource usage via psutil if available."""
+    try:
+        import psutil
+        return {
+            "cpu_usage": f"{psutil.cpu_percent(interval=0.1):.1f}%",
+            "memory_usage": f"{psutil.virtual_memory().percent:.1f}%",
+            "disk_usage": f"{psutil.disk_usage('/').percent:.1f}%",
+            "network_io": "N/A",
+            "disk_io": "N/A",
+        }
+    except ImportError:
+        return {
+            "cpu_usage": "N/A",
+            "memory_usage": "N/A",
+            "disk_usage": "N/A",
+            "network_io": "N/A",
+            "disk_io": "N/A",
+        }
 
 async def get_api_performance():
     """Get API performance metrics"""
     return {
-        "requests_per_minute": 234,
-        "average_response_time": "45ms",
-        "error_rate": "0.3%",
-        "active_connections": len(manager.active_connections)
+        "requests_per_minute": int(_db_scalar("SELECT COUNT(*) FROM runs WHERE updated_at >= datetime('now', '-1 minute')") or 0),
+        "average_response_time": "N/A",
+        "error_rate": "N/A",
+        "active_connections": len(manager.active_connections),
     }
 
 async def get_database_performance():
     """Get database performance metrics"""
+    total_contacts = int(_db_scalar("SELECT COUNT(*) FROM contacts") or 0)
+    total_runs = int(_db_scalar("SELECT COUNT(*) FROM runs") or 0)
     return {
-        "query_time_avg": "12ms",
-        "connections_active": 15,
-        "connections_max": 100,
-        "cache_hit_rate": "94.2%"
+        "query_time_avg": "N/A",
+        "connections_active": 1,
+        "connections_max": 1,
+        "cache_hit_rate": "N/A",
+        "total_contacts": total_contacts,
+        "total_runs": total_runs,
     }
 
 async def get_processing_queue_size():
-    """Get current processing queue size"""
-    return 23
+    """Get number of pending runs."""
+    return int(_db_scalar("SELECT COUNT(*) FROM runs WHERE status = 'pending'") or 0)
 
 async def get_system_load():
-    """Get current system load"""
-    return 0.34
+    """Get normalised system load (0–1)."""
+    try:
+        import psutil
+        return round(psutil.cpu_percent(interval=0.1) / 100.0, 2)
+    except ImportError:
+        return 0.0
 
 async def get_ai_model_status():
     """Get AI model status"""
@@ -522,46 +625,70 @@ def parse_timeframe(timeframe: str) -> int:
         return 24  # Default to 24 hours
 
 async def get_risk_score_trends(hours: int):
-    """Get risk score trends over time"""
-    # Simulate trend data
-    import random
-    return [
-        {
-            "timestamp": (datetime.now() - timedelta(hours=i)).isoformat(),
-            "average_risk_score": round(random.uniform(0.2, 0.8), 2)
-        }
-        for i in range(hours, 0, -1)
-    ]
+    """Average risk score per hour bucket from investigations DB (score stored as 0-100)."""
+    rows = _db_rows(
+        """SELECT strftime('%Y-%m-%dT%H:00:00', completed_at) AS ts,
+                  ROUND(AVG(score) / 100.0, 2) AS average_risk_score
+           FROM investigations
+           WHERE score IS NOT NULL
+             AND completed_at >= datetime('now', ? || ' hours')
+           GROUP BY ts
+           ORDER BY ts""",
+        (f"-{hours}",),
+    )
+    if rows:
+        return [{"timestamp": r["ts"], "average_risk_score": float(r["average_risk_score"] or 0.0)} for r in rows]
+    return [{"timestamp": datetime.now().isoformat(), "average_risk_score": 0.0}]
+
 
 async def get_threat_detection_trends(hours: int):
-    """Get threat detection trends over time"""
-    import random
-    return [
-        {
-            "timestamp": (datetime.now() - timedelta(hours=i)).isoformat(),
-            "threats_detected": random.randint(5, 25)
-        }
-        for i in range(hours, 0, -1)
-    ]
+    """Count of new investigations per hour bucket."""
+    rows = _db_rows(
+        """SELECT strftime('%Y-%m-%dT%H:00:00', created_at) AS ts,
+                  COUNT(*) AS threats_detected
+           FROM investigations
+           WHERE created_at >= datetime('now', ? || ' hours')
+           GROUP BY ts
+           ORDER BY ts""",
+        (f"-{hours}",),
+    )
+    if rows:
+        return [{"timestamp": r["ts"], "threats_detected": int(r["threats_detected"] or 0)} for r in rows]
+    return [{"timestamp": datetime.now().isoformat(), "threats_detected": 0}]
+
 
 async def get_processing_volume_trends(hours: int):
-    """Get processing volume trends over time"""
-    import random
-    return [
-        {
-            "timestamp": (datetime.now() - timedelta(hours=i)).isoformat(),
-            "items_processed": random.randint(100, 300)
-        }
-        for i in range(hours, 0, -1)
-    ]
+    """Count of contacts added per hour bucket."""
+    rows = _db_rows(
+        """SELECT strftime('%Y-%m-%dT%H:00:00', created_at) AS ts,
+                  COUNT(*) AS items_processed
+           FROM contacts
+           WHERE created_at >= datetime('now', ? || ' hours')
+           GROUP BY ts
+           ORDER BY ts""",
+        (f"-{hours}",),
+    )
+    if rows:
+        return [{"timestamp": r["ts"], "items_processed": int(r["items_processed"] or 0)} for r in rows]
+    return [{"timestamp": datetime.now().isoformat(), "items_processed": 0}]
+
 
 async def get_accuracy_trends(hours: int):
-    """Get accuracy trends over time"""
-    import random
-    return [
-        {
-            "timestamp": (datetime.now() - timedelta(hours=i)).isoformat(),
-            "accuracy": round(random.uniform(0.85, 0.98), 3)
-        }
-        for i in range(hours, 0, -1)
-    ]
+    """Completion rate (completed / total finished) per hour bucket from runs."""
+    rows = _db_rows(
+        """SELECT strftime('%Y-%m-%dT%H:00:00', completed_at) AS ts,
+                  ROUND(
+                      1.0 * SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END)
+                      / MAX(COUNT(*), 1),
+                      3
+                  ) AS accuracy
+           FROM runs
+           WHERE completed_at IS NOT NULL
+             AND completed_at >= datetime('now', ? || ' hours')
+           GROUP BY ts
+           ORDER BY ts""",
+        (f"-{hours}",),
+    )
+    if rows:
+        return [{"timestamp": r["ts"], "accuracy": float(r["accuracy"] or 0.0)} for r in rows]
+    return [{"timestamp": datetime.now().isoformat(), "accuracy": 0.0}]

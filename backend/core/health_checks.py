@@ -5,13 +5,11 @@ Comprehensive health monitoring for all system components
 
 import asyncio
 import logging
+import sqlite3
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 import psutil
-# import aioredis  # Temporarily disabled due to Python 3.12 compatibility issue
-from sqlalchemy import create_engine, text
-from sqlalchemy.exc import SQLAlchemyError
 
 from backend.core.config import get_settings
 from backend.core.error_handlers import HealthCheckError
@@ -71,66 +69,52 @@ class HealthMonitor:
         start_time = time.time()
 
         try:
-            engine = create_engine(self.settings.database_url)
+            # Extract file path from sqlite URL or use directly
+            db_url = self.settings.DATABASE_URL
+            db_path = db_url.replace("sqlite:///", "").replace("sqlite://", "") if "sqlite" in db_url else db_url
 
-            with engine.connect() as connection:
-                # Test basic connectivity
-                result = connection.execute(text("SELECT 1 as test"))
-                test_value = result.fetchone()[0]
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
 
-                if test_value != 1:
-                    raise Exception("Database test query returned unexpected result")
+            # Test basic connectivity
+            cursor.execute("SELECT 1")
+            test_value = cursor.fetchone()[0]
+            if test_value != 1:
+                raise Exception("Database test query returned unexpected result")
 
-                # Test transaction performance
-                tx_start = time.time()
-                with connection.begin():
-                    connection.execute(text("SELECT COUNT(*) FROM information_schema.tables"))
-                tx_duration = (time.time() - tx_start) * 1000
+            # Count tables
+            cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
+            table_count = cursor.fetchone()[0]
 
-                # Check connection pool status
-                pool = engine.pool
-                pool_status = {
-                    "size": pool.size(),
-                    "checked_in": pool.checkedin(),
-                    "checked_out": pool.checkedout(),
-                    "overflow": pool.overflow(),
-                    "invalid": pool.invalid()
-                }
+            # Test transaction performance
+            tx_start = time.time()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [row[0] for row in cursor.fetchall()]
+            tx_duration = (time.time() - tx_start) * 1000
 
-                duration_ms = (time.time() - start_time) * 1000
-
-                # Determine status based on performance
-                if duration_ms > 1000:  # > 1 second
-                    status = HealthStatus.DEGRADED
-                    message = "Database responding slowly"
-                elif tx_duration > 500:  # > 500ms for transaction
-                    status = HealthStatus.DEGRADED
-                    message = "Database transactions slow"
-                else:
-                    status = HealthStatus.HEALTHY
-                    message = "Database operational"
-
-                return HealthCheck(
-                    name="database",
-                    status=status,
-                    message=message,
-                    duration_ms=duration_ms,
-                    details={
-                        "transaction_duration_ms": round(tx_duration, 2),
-                        "pool_status": pool_status,
-                        "database_url": self.settings.database_url.split('@')[0] + "@***"  # Hide credentials
-                    }
-                )
-
-        except SQLAlchemyError as e:
+            conn.close()
             duration_ms = (time.time() - start_time) * 1000
+
+            if duration_ms > 1000:
+                health_status = HealthStatus.DEGRADED
+                message = "Database responding slowly"
+            else:
+                health_status = HealthStatus.HEALTHY
+                message = "Database operational"
+
             return HealthCheck(
                 name="database",
-                status=HealthStatus.UNHEALTHY,
-                message=f"Database connection failed: {str(e)[:100]}",
+                status=health_status,
+                message=message,
                 duration_ms=duration_ms,
-                details={"error_type": type(e).__name__}
+                details={
+                    "transaction_duration_ms": round(tx_duration, 2),
+                    "table_count": table_count,
+                    "tables": tables,
+                    "database_path": db_path,
+                }
             )
+
         except Exception as e:
             duration_ms = (time.time() - start_time) * 1000
             return HealthCheck(
@@ -157,10 +141,18 @@ class HealthMonitor:
                 )
 
             # redis = aioredis.from_url(self.settings.redis_url)  # Temporarily disabled
-            raise Exception("Redis temporarily disabled due to compatibility issues")
-
-            # Test basic connectivity
-            pong = await redis.ping()
+            import redis as redis_lib
+            redis_url = getattr(self.settings, "REDIS_URL", None)
+            if not redis_url:
+                return HealthCheck(
+                    name="redis",
+                    status=HealthStatus.UNKNOWN,
+                    message="Redis not configured (REDIS_URL not set)",
+                    duration_ms=0,
+                    details={"configured": False}
+                )
+            redis_client = redis_lib.Redis.from_url(redis_url, socket_connect_timeout=2)
+            pong = redis_client.ping()
             if not pong:
                 raise Exception("Redis ping failed")
 
@@ -169,21 +161,21 @@ class HealthMonitor:
             test_value = f"test_{int(time.time())}"
 
             write_start = time.time()
-            await redis.set(test_key, test_value, ex=60)  # Expire in 60 seconds
+            redis_client.set(test_key, test_value, ex=60)
             write_duration = (time.time() - write_start) * 1000
 
             read_start = time.time()
-            stored_value = await redis.get(test_key)
+            stored_value = redis_client.get(test_key)
             read_duration = (time.time() - read_start) * 1000
 
-            if stored_value.decode() != test_value:
+            if stored_value and stored_value.decode() != test_value:
                 raise Exception("Redis read/write test failed")
 
             # Clean up test key
-            await redis.delete(test_key)
+            redis_client.delete(test_key)
 
             # Get Redis info
-            info = await redis.info()
+            info = redis_client.info()
 
             duration_ms = (time.time() - start_time) * 1000
 
@@ -195,7 +187,7 @@ class HealthMonitor:
                 status = HealthStatus.HEALTHY
                 message = "Redis operational"
 
-            await redis.close()
+            redis_client.close()
 
             return HealthCheck(
                 name="redis",
@@ -370,7 +362,7 @@ class HealthMonitor:
             missing_vars = []
 
             for var in required_vars:
-                if not getattr(self.settings, var.lower().replace("_", ""), None):
+                if not getattr(self.settings, var, None):
                     missing_vars.append(var)
 
             # Check application startup time
@@ -398,8 +390,8 @@ class HealthMonitor:
                 duration_ms=duration_ms,
                 details={
                     "uptime_seconds": round(uptime_seconds, 2),
-                    "environment": self.settings.environment,
-                    "debug_mode": self.settings.debug,
+                    "environment": self.settings.ENVIRONMENT,
+                    "debug_mode": self.settings.DEBUG,
                     "missing_config": missing_vars,
                     "python_version": f"{psutil.version_info}",
                     "process_id": psutil.Process().pid

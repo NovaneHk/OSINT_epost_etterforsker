@@ -9,9 +9,10 @@ import { Plus, Play, Pause, Settings, BarChart3, Calendar, Target } from 'lucide
 import { toast } from "sonner"
 import CreateCampaignDialog from './create-campaign-dialog'
 import CampaignDetails from './campaign-details'
+import { api } from '@/lib/api'
 
 interface Campaign {
-  id: number
+  id: string
   name: string
   description: string
   status: string
@@ -49,15 +50,26 @@ export default function CampaignsPage() {
     fetchStats()
   }, [])
 
+  const mapCampaign = (campaign: any): Campaign => ({
+    id: String(campaign.id),
+    name: campaign.name,
+    description: campaign.description || '',
+    status: campaign.status,
+    type: String(campaign.filter_criteria?.type || 'targeted'),
+    sources: JSON.stringify(campaign.target_sources || []),
+    filter_criteria: JSON.stringify(campaign.filter_criteria || {}),
+    leads_target: Number(campaign.target_count || 0),
+    leads_found: Number(campaign.leads_count || 0),
+    progress: Number(campaign.progress || 0),
+    created_at: campaign.created_at,
+    started_at: campaign.started_at,
+    completed_at: campaign.ended_at,
+  })
+
   const fetchCampaigns = async () => {
     try {
-      const response = await fetch('/api/campaigns')
-      if (response.ok) {
-        const data = await response.json()
-        setCampaigns(data)
-      } else {
-        toast.error('Failed to fetch campaigns')
-      }
+      const data = await api.getCampaigns()
+      setCampaigns(data.data.map(mapCampaign))
     } catch (error) {
       console.error('Error fetching campaigns:', error)
       toast.error('Error loading campaigns')
@@ -68,48 +80,41 @@ export default function CampaignsPage() {
 
   const fetchStats = async () => {
     try {
-      const response = await fetch('/api/campaigns/stats')
-      if (response.ok) {
-        const data = await response.json()
-        setStats(data)
-      }
+      const data = await api.getCampaignStatistics()
+      const statusBreakdown = data.campaigns_by_status || {}
+      setStats({
+        total_campaigns: Number(data.total_campaigns || 0),
+        active_campaigns: Number(data.active_campaigns || 0),
+        completed_campaigns: Number(statusBreakdown.completed || 0),
+        draft_campaigns: Number(statusBreakdown.draft || 0),
+        total_leads_generated: Number(data.total_leads_generated || 0),
+        avg_completion_rate: Math.round(Number(data.success_rate || 0) * 100),
+        status_breakdown: statusBreakdown,
+        type_breakdown: data.campaigns_by_type || {},
+      })
     } catch (error) {
       console.error('Error fetching campaign stats:', error)
     }
   }
 
-  const handleStartCampaign = async (campaignId: number) => {
+  const handleStartCampaign = async (campaignId: string) => {
     try {
-      const response = await fetch(`/api/campaigns/${campaignId}/start`, {
-        method: 'POST'
-      })
-
-      if (response.ok) {
-        toast.success('Campaign started successfully')
-        fetchCampaigns()
-        fetchStats()
-      } else {
-        toast.error('Failed to start campaign')
-      }
+      await api.startCampaign(campaignId)
+      toast.success('Campaign started successfully')
+      fetchCampaigns()
+      fetchStats()
     } catch (error) {
       console.error('Error starting campaign:', error)
       toast.error('Error starting campaign')
     }
   }
 
-  const handlePauseCampaign = async (campaignId: number) => {
+  const handlePauseCampaign = async (campaignId: string) => {
     try {
-      const response = await fetch(`/api/campaigns/${campaignId}/pause`, {
-        method: 'POST'
-      })
-
-      if (response.ok) {
-        toast.success('Campaign paused successfully')
-        fetchCampaigns()
-        fetchStats()
-      } else {
-        toast.error('Failed to pause campaign')
-      }
+      await api.pauseCampaign(campaignId)
+      toast.success('Campaign paused successfully')
+      fetchCampaigns()
+      fetchStats()
     } catch (error) {
       console.error('Error pausing campaign:', error)
       toast.error('Error pausing campaign')
@@ -126,7 +131,8 @@ export default function CampaignsPage() {
     }
   }
 
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString?: string) => {
+    if (!dateString) return 'N/A'
     return new Date(dateString).toLocaleDateString()
   }
 
@@ -224,14 +230,15 @@ export default function CampaignsPage() {
 
         <TabsContent value="all" className="space-y-4">
           {isLoading ? (
-            <div className="text-center py-8">Loading campaigns...</div>
+            <div className="text-center py-8">Laster kampanjer...</div>
           ) : campaigns.length === 0 ? (
             <Card>
-              <CardContent className="text-center py-8">
-                <p className="text-muted-foreground mb-4">No campaigns found</p>
+              <CardContent className="text-center py-16">
+                <p className="text-4xl mb-4">📢</p>
+                <p className="text-muted-foreground mb-4">Ingen kampanjer ennå</p>
                 <Button onClick={() => setShowCreateDialog(true)}>
                   <Plus className="h-4 w-4 mr-2" />
-                  Create your first campaign
+                  Opprett din første kampanje
                 </Button>
               </CardContent>
             </Card>

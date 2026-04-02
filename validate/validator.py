@@ -69,8 +69,8 @@ class EmailValidator:
     """Advanced email validation with multiple verification layers."""
 
     def __init__(self, *args, **kwargs):
-        self.config_manager = kwargs.get('config_manager', None)
-        self.db_manager = DatabaseManager() if self.config_manager else None
+        self.config_manager = args[0] if args else kwargs.get('config_manager', None)
+        self.db_manager = DatabaseManager()
         self.rules_config = self.config_manager.load_rules() if self.config_manager else {}
         self.validation_cache = {}
         self.seen_emails = set()
@@ -388,10 +388,10 @@ class EmailValidator:
 
     def validate_all_emails(self, mx_check: bool = True, smtp_probe: bool = False,
                            aggressive_dedupe: bool = True, risk_assessment: bool = True) -> Dict[str, Any]:
-        """Validate all emails in the database."""
+        """Validate all contacts in the contacts table and update their status."""
+        from core.database import ContactStatus
 
-        # Get all emails from database
-        emails = self.db_manager.get_emails(min_score=0)  # Get all emails
+        contacts = self.db_manager.get_all_contacts()
 
         total_processed = 0
         status_breakdown = {
@@ -399,53 +399,59 @@ class EmailValidator:
             'invalid': 0,
             'risky': 0,
             'duplicate': 0,
-            'unknown': 0
+            'unknown': 0,
         }
 
-        logger.info(f"Starting validation of {len(emails)} emails")
+        logger.info(f"Starting validation of {len(contacts)} contacts")
 
-        for email_record in emails:
-            email = email_record['email']
-            email_id = email_record['id']
-
+        for contact in contacts:
+            email = contact.email
             try:
-                # Perform validation
                 validation_result = self.validate_single_email(
                     email,
                     mx_check=mx_check,
                     smtp_probe=smtp_probe,
-                    risk_assessment=risk_assessment
+                    risk_assessment=risk_assessment,
                 )
 
-                # Check for duplicates if aggressive deduplication is enabled
+                # Duplicate check
                 if aggressive_dedupe:
-                    is_duplicate = self._check_duplicate(email, email_record.get('role', ''))
-                    if is_duplicate:
+                    if self._check_duplicate(email, contact.role or ''):
                         validation_result['status'] = 'duplicate'
                         validation_result['risk_score'] = 100
 
-                # Update database with validation results
-                self.db_manager.update_email_validation(email_id, validation_result)
+                # Map validation result → ContactStatus
+                vstatus = validation_result.get('status', 'unknown')
+                if vstatus == 'valid':
+                    contact.status = ContactStatus.VALIDATED
+                elif vstatus in ('invalid', 'duplicate'):
+                    contact.status = ContactStatus.INVALID
+                else:
+                    contact.status = ContactStatus.UNVALIDATED
 
-                # Update statistics
-                status = validation_result.get('status', 'unknown')
-                status_breakdown[status] = status_breakdown.get(status, 0) + 1
+                # Update confidence from validation
+                if validation_result.get('risk_score', 0) < 30:
+                    contact.confidence_score = max(contact.confidence_score, 0.7)
+
+                self.db_manager.add_contact(contact)  # upsert
+
+                status_breakdown[vstatus] = status_breakdown.get(vstatus, 0) + 1
                 total_processed += 1
 
                 if total_processed % 100 == 0:
-                    logger.info(f"Processed {total_processed}/{len(emails)} emails")
+                    logger.info(f"Processed {total_processed}/{len(contacts)} contacts")
 
             except Exception as e:
                 logger.error(f"Error validating email {email}: {e}")
                 status_breakdown['unknown'] += 1
                 total_processed += 1
 
-        logger.info(f"Validation completed. Processed {total_processed} emails")
+        logger.info(f"Validation completed. Processed {total_processed} contacts")
 
         return {
             'total_processed': total_processed,
             'status_breakdown': status_breakdown,
-            'validation_rate': (status_breakdown['valid'] / total_processed * 100) if total_processed > 0 else 0
+            'validation_rate': (status_breakdown['valid'] / total_processed * 100) if total_processed > 0 else 0,
         }
 
     def validate_single_email(self, email: str, mx_check: bool = True,
@@ -802,6 +808,7 @@ class EmailValidator:
 
     def clear_cache(self):
         """Clear validation cache."""
+        self.cache.clear()
         self.validation_cache.clear()
         self.seen_emails.clear()
         self.domain_role_combinations.clear()

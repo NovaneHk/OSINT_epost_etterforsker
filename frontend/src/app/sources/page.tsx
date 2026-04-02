@@ -326,41 +326,80 @@ export default function SourcesPage() {
               </TabsContent>
 
               <TabsContent value="configuration" className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Konfigurasjon</Label>
-                  <Textarea
-                    value={JSON.stringify(formData.configuration, null, 2)}
-                    onChange={(e) => {
-                      try {
-                        const config = JSON.parse(e.target.value);
-                        setFormData({ ...formData, configuration: config });
-                      } catch {
-                        // Ignore invalid JSON
-                      }
-                    }}
-                    placeholder='{"key": "value"}'
-                    rows={10}
-                    className="font-mono text-sm"
-                  />
-                  <p className="text-sm text-muted-foreground">
-                    JSON-konfigurasjon for kilden. Vil variere basert på type.
-                  </p>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="schedule" className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="schedule">Cron-planlegging</Label>
-                  <Input
-                    id="schedule"
-                    value={formData.schedule}
-                    onChange={(e) => setFormData({ ...formData, schedule: e.target.value })}
-                    placeholder="0 */6 * * * (hver 6. time)"
-                  />
-                  <p className="text-sm text-muted-foreground">
-                    Cron-uttrykk for automatisk kjøring. La stå tom for manuell kjøring.
-                  </p>
-                </div>
+                {formData.type === 'website' && (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Søkedybde</Label>
+                      <Input
+                        type="number"
+                        min={1} max={5}
+                        value={(formData.configuration.depth as number) ?? 2}
+                        onChange={(e) => setFormData({ ...formData, configuration: { ...formData.configuration, depth: Number(e.target.value) } })}
+                      />
+                      <p className="text-xs text-muted-foreground">Antall lenkenivåer å følge (1–5)</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Forsinkelse mellom forespørsler (sek)</Label>
+                      <Input
+                        type="number"
+                        min={0} step={0.5}
+                        value={(formData.configuration.crawl_delay as number) ?? 1}
+                        onChange={(e) => setFormData({ ...formData, configuration: { ...formData.configuration, crawl_delay: Number(e.target.value) } })}
+                      />
+                    </div>
+                  </>
+                )}
+                {formData.type === 'api' && (
+                  <>
+                    <div className="space-y-2">
+                      <Label>API-endepunkt</Label>
+                      <Input
+                        value={(formData.configuration.endpoint as string) ?? ''}
+                        onChange={(e) => setFormData({ ...formData, configuration: { ...formData.configuration, endpoint: e.target.value } })}
+                        placeholder="https://api.example.com/v1/contacts"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>API-nøkkel</Label>
+                      <Input
+                        type="password"
+                        value={(formData.configuration.api_key as string) ?? ''}
+                        onChange={(e) => setFormData({ ...formData, configuration: { ...formData.configuration, api_key: e.target.value } })}
+                        placeholder="sk-..."
+                      />
+                    </div>
+                  </>
+                )}
+                {(formData.type === 'linkedin' || formData.type === 'twitter') && (
+                  <div className="space-y-2">
+                    <Label>Brukernavn / handle</Label>
+                    <Input
+                      value={(formData.configuration.handle as string) ?? ''}
+                      onChange={(e) => setFormData({ ...formData, configuration: { ...formData.configuration, handle: e.target.value } })}
+                      placeholder="@brukernavn"
+                    />
+                  </div>
+                )}
+                {formData.type === 'directory' && (
+                  <div className="space-y-2">
+                    <Label>Kategori</Label>
+                    <Input
+                      value={(formData.configuration.category as string) ?? ''}
+                      onChange={(e) => setFormData({ ...formData, configuration: { ...formData.configuration, category: e.target.value } })}
+                      placeholder="f.eks. technology, finance"
+                    />
+                  </div>
+                )}
+                {formData.type === 'upload' && (
+                  <div className="space-y-2">
+                    <Label>Tillatte filtyper</Label>
+                    <Input
+                      value={(formData.configuration.file_types as string) ?? 'csv,xlsx'}
+                      onChange={(e) => setFormData({ ...formData, configuration: { ...formData.configuration, file_types: e.target.value } })}
+                      placeholder="csv, xlsx, json"
+                    />
+                  </div>
+                )}
               </TabsContent>
             </Tabs>
             <DialogFooter>
@@ -586,26 +625,63 @@ export default function SourcesPage() {
             </TabsContent>
 
             <TabsContent value="configuration" className="space-y-4">
-              <div className="space-y-2">
-                <Label>Konfigurasjon</Label>
-                <Textarea
-                  value={JSON.stringify(formData.configuration, null, 2)}
-                  onChange={(e) => {
-                    try {
-                      const config = JSON.parse(e.target.value);
-                      setFormData({ ...formData, configuration: config });
-                    } catch {
-                      // Ignore invalid JSON
-                    }
-                  }}
-                  placeholder='{"key": "value"}'
-                  rows={10}
-                  className="font-mono text-sm"
-                />
-                <p className="text-sm text-muted-foreground">
-                  JSON-konfigurasjon for kilden. Vil variere basert på type.
-                </p>
-              </div>
+              {formData.type === 'website' && (
+                <>
+                  <div className="space-y-2">
+                    <Label>Søkedybde</Label>
+                    <Input
+                      type="number" min={1} max={5}
+                      value={(formData.configuration.depth as number) ?? 2}
+                      onChange={(e) => setFormData({ ...formData, configuration: { ...formData.configuration, depth: Number(e.target.value) } })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Forsinkelse (sek)</Label>
+                    <Input
+                      type="number" min={0} step={0.5}
+                      value={(formData.configuration.crawl_delay as number) ?? 1}
+                      onChange={(e) => setFormData({ ...formData, configuration: { ...formData.configuration, crawl_delay: Number(e.target.value) } })}
+                    />
+                  </div>
+                </>
+              )}
+              {formData.type === 'api' && (
+                <>
+                  <div className="space-y-2">
+                    <Label>API-endepunkt</Label>
+                    <Input
+                      value={(formData.configuration.endpoint as string) ?? ''}
+                      onChange={(e) => setFormData({ ...formData, configuration: { ...formData.configuration, endpoint: e.target.value } })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>API-nøkkel</Label>
+                    <Input type="password"
+                      value={(formData.configuration.api_key as string) ?? ''}
+                      onChange={(e) => setFormData({ ...formData, configuration: { ...formData.configuration, api_key: e.target.value } })}
+                    />
+                  </div>
+                </>
+              )}
+              {(formData.type === 'linkedin' || formData.type === 'twitter') && (
+                <div className="space-y-2">
+                  <Label>Handle</Label>
+                  <Input
+                    value={(formData.configuration.handle as string) ?? ''}
+                    onChange={(e) => setFormData({ ...formData, configuration: { ...formData.configuration, handle: e.target.value } })}
+                    placeholder="@brukernavn"
+                  />
+                </div>
+              )}
+              {formData.type === 'directory' && (
+                <div className="space-y-2">
+                  <Label>Kategori</Label>
+                  <Input
+                    value={(formData.configuration.category as string) ?? ''}
+                    onChange={(e) => setFormData({ ...formData, configuration: { ...formData.configuration, category: e.target.value } })}
+                  />
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="schedule" className="space-y-4">

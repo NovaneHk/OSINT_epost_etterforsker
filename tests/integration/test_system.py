@@ -86,7 +86,7 @@ def test_system_components():
         print(f"\n[ERROR] Test failed: {e}")
         return False
 
-async def test_dry_run_workflow():
+def test_dry_run_workflow():
     """Test a complete dry-run workflow."""
 
     print("\nTesting Complete Workflow (Dry Run)")

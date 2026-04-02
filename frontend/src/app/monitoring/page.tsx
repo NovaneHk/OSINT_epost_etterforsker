@@ -16,6 +16,9 @@ export const metadata: Metadata = {
   description: 'Real-time performance monitoring and system status',
 };
 
+// Force dynamic rendering to avoid build-time errors with WebSocket components
+export const dynamic = 'force-dynamic';
+
 export default function MonitoringPage() {
   return (
     <div className="container mx-auto py-8 space-y-8">

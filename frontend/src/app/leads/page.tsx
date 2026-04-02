@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { Suspense, useState, useCallback, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SmartFilterBar } from '@/components/shared/smart-filter-bar';
 import { LeadTable } from '@/components/leads/lead-table';
@@ -53,12 +53,14 @@ import {
 } from 'lucide-react';
 import { formatNumber } from '@/lib/utils';
 import { api } from '@/lib/api';
-import type { Lead, FilterState, SortState, LeadsResponse, BatchUpdateLeadsRequest, LeadFilters } from '@/types/api';
+import type { Lead, FilterState, SortState, LeadsResponse, BatchUpdateLeadsRequest, LeadFilters, LeadSavedView } from '@/types/api';
+import { useAuthStore } from '@/store/auth';
 
 export default function LeadsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { isLoading: pageLoading, startLoading: startPageLoading, stopLoading: stopPageLoading } = useLoadingState('leads-page');
+  const { user } = useAuthStore();
 
   // State
   const [filters, setFilters] = useState<FilterState>({
@@ -77,16 +79,30 @@ export default function LeadsPage() {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleteLeadIds, setDeleteLeadIds] = useState<string[]>([]);
+  const [activeSavedView, setActiveSavedView] = useState<LeadSavedView | null>(null);
 
   // Convert filters to LeadFilters format
   const leadFilters: LeadFilters = {
     search: filters.search || undefined,
     tags: filters.tags.length > 0 ? filters.tags : undefined,
+    verification_status: filters.status ? [filters.status as Lead['verification_status']] : undefined,
+    confidence_score_min: filters.scoreRange[0] > 0 ? filters.scoreRange[0] : undefined,
+    confidence_score_max: filters.scoreRange[1] < 100 ? filters.scoreRange[1] : undefined,
+    source_ids: filters.sources.length > 0 ? filters.sources : undefined,
+    date_from: filters.dateRange?.from ? filters.dateRange.from.toISOString() : undefined,
+    date_to: filters.dateRange?.to ? filters.dateRange.to.toISOString() : undefined,
     page,
     limit: 50,
     sort_by: sort.field,
     sort_order: sort.direction,
   };
+
+  const {
+    data: savedViews = [],
+  } = useQuery({
+    queryKey: ['lead-saved-views', user?.id, user?.role],
+    queryFn: () => api.getLeadSavedViews({ userId: user?.id, role: user?.role }),
+  });
 
   // Fetch leads
   const {
@@ -140,6 +156,51 @@ export default function LeadsPage() {
     },
   });
 
+  const saveViewMutation = useMutation({
+    mutationFn: ({ name, savedFilters }: { name: string; savedFilters: FilterState }) =>
+      api.createLeadSavedView({
+        name,
+        filters: savedFilters,
+        scope: user?.role === 'admin' ? 'role' : user?.id ? 'private' : 'global',
+        owner_user_id: user?.id,
+        owner_role: user?.role,
+      }),
+    onSuccess: (savedView) => {
+      queryClient.invalidateQueries({ queryKey: ['lead-saved-views'] });
+      setActiveSavedView(savedView);
+      toast({
+        title: 'Elite query lagret',
+        description: `Visningen "${savedView.name}" er lagret som ${savedView.scope === 'role' ? 'rollequery' : savedView.scope === 'global' ? 'global query' : 'personlig query'}.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Kunne ikke lagre query',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const deleteViewMutation = useMutation({
+    mutationFn: (viewId: string) => api.deleteLeadSavedView(viewId, { userId: user?.id, role: user?.role }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lead-saved-views'] });
+      setActiveSavedView(null);
+      toast({
+        title: 'Lagret query slettet',
+        description: 'Den lagrede elite-queryen er fjernet.',
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Kunne ikke slette query',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
   const runMutation = useMutation({
     mutationFn: () =>
       api.createRun({
@@ -164,6 +225,7 @@ export default function LeadsPage() {
   // Event handlers
   const handleFiltersChange = (newFilters: FilterState) => {
     setFilters(newFilters);
+    setActiveSavedView(null);
     setPage(1); // Reset to first page when filters change
   };
 
@@ -208,6 +270,65 @@ export default function LeadsPage() {
 
   const handleStartRun = () => {
     runMutation.mutate();
+  };
+
+  const handleSaveView = (name: string, savedFilters: FilterState) => {
+    saveViewMutation.mutate({ name, savedFilters });
+  };
+
+  const handleLoadView = (view: LeadSavedView) => {
+    setFilters(view.filters);
+    setPage(1);
+    setActiveSavedView(view);
+    toast({
+      title: 'Elite query lastet',
+      description: `Visningen "${view.name}" er aktiv.`,
+    });
+  };
+
+  const elitePresets: Array<{ key: string; label: string; filters: FilterState }> = [
+    {
+      key: 'high-intent',
+      label: 'High Intent',
+      filters: {
+        search: '',
+        tags: [],
+        scoreRange: [85, 100],
+        sources: [],
+        status: 'verified',
+      },
+    },
+    {
+      key: 'new-this-week',
+      label: 'Nye denne uken',
+      filters: {
+        search: '',
+        tags: [],
+        scoreRange: [0, 100],
+        sources: [],
+        dateRange: {
+          from: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+          to: new Date(),
+        },
+      },
+    },
+    {
+      key: 'review-queue',
+      label: 'Review Queue',
+      filters: {
+        search: '',
+        tags: [],
+        scoreRange: [70, 89],
+        sources: [],
+        status: 'unverified',
+      },
+    },
+  ];
+
+  const applyElitePreset = (preset: FilterState) => {
+    setFilters(preset);
+    setPage(1);
+    setActiveSavedView(null);
   };
 
   // Computed values
@@ -388,16 +509,42 @@ export default function LeadsPage() {
       {/* Filters */}
       <Card>
         <CardContent className="pt-6">
-          <SmartFilterBar
-            placeholder="Søk i leads, bedrifter, e-poster..."
-            initialFilters={filters}
-            onFiltersChange={handleFiltersChange}
-            suggestions={[
-              'CEO', 'CTO', 'Manager', 'Developer', 'Sales',
-              'Oslo', 'Bergen', 'Trondheim', 'Stavanger',
-              'tech', 'finance', 'healthcare', 'consulting'
-            ]}
-          />
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <Badge variant="outline">Elite presets</Badge>
+            {elitePresets.map((preset) => (
+              <Button
+                key={preset.key}
+                variant="outline"
+                size="sm"
+                onClick={() => applyElitePreset(preset.filters)}
+              >
+                {preset.label}
+              </Button>
+            ))}
+          </div>
+          <Suspense fallback={<div className="text-sm text-muted-foreground">Laster filtre...</div>}>
+            <SmartFilterBar
+              placeholder="Søk i leads, bedrifter, e-poster..."
+              initialFilters={filters}
+              onFiltersChange={handleFiltersChange}
+              savedViews={savedViews}
+              onSaveView={handleSaveView}
+              onLoadView={handleLoadView}
+              onDeleteView={(viewId) => deleteViewMutation.mutate(viewId)}
+              suggestions={[
+                'CEO', 'CTO', 'Manager', 'Developer', 'Sales',
+                'Oslo', 'Bergen', 'Trondheim', 'Stavanger',
+                'tech', 'finance', 'healthcare', 'consulting'
+              ]}
+            />
+          </Suspense>
+          {activeSavedView && (
+            <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+              <Badge variant="secondary">Elite mode</Badge>
+              <span>Aktiv lagret query: {activeSavedView.name}</span>
+              {activeSavedView.scope && <Badge variant="outline">{activeSavedView.scope}</Badge>}
+            </div>
+          )}
         </CardContent>
       </Card>
 

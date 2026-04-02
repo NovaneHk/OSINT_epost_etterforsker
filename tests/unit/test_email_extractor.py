@@ -338,10 +338,14 @@ class TestEmailExtractor:
         """Test context extraction around email matches"""
         text = "This is a long sentence with contact@example.com in the middle of it for testing purposes."
 
-        context = extractor._extract_context(text, 25, 43)  # Position of email
+        start, end = 25, 43
+        context = extractor._extract_context(text, start, end)
 
         assert "contact@example.com" in context
-        assert len(context) <= extractor.max_context_chars
+        # max_context_chars is added before AND after the match window, so total
+        # length is bounded by 2 * max_context_chars + (end - start)
+        max_expected = 2 * extractor.max_context_chars + (end - start)
+        assert len(context) <= max_expected
         assert "long sentence" in context
         assert "middle of it" in context
 

@@ -10,6 +10,7 @@ import sys
 import json
 from datetime import datetime
 from pathlib import Path
+import pytest
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -23,6 +24,16 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+import pytest_asyncio
+
+@pytest_asyncio.fixture
+async def phase3_test_suite():
+    """Test suite fixture for Phase 3 AI features"""
+    test_suite = Phase3AITest()
+    test_suite.ai_engine = get_ai_analytics_engine()
+    test_suite.nlp_processor = get_nlp_processor()
+    return test_suite
 
 class Phase3AITest:
     """Test suite for Phase 3 AI features"""
@@ -476,5 +487,55 @@ async def main():
         logger.error(f"Test suite execution failed: {e}")
         return 1
 
+@pytest.mark.asyncio
+async def test_ai_engine_initialization(phase3_test_suite):
+    """Test AI Engine initialization"""
+    assert await phase3_test_suite.test_ai_engine_init() is True
+
+@pytest.mark.asyncio
+async def test_nlp_processor_initialization(phase3_test_suite):
+    """Test NLP Processor initialization"""
+    assert await phase3_test_suite.test_nlp_processor_init() is True
+
+@pytest.mark.asyncio
+async def test_email_risk_analysis(phase3_test_suite):
+    """Test email risk analysis"""
+    assert await phase3_test_suite.test_email_risk_analysis() is True
+
+@pytest.mark.asyncio
+async def test_domain_reputation_analysis(phase3_test_suite):
+    """Test domain reputation analysis"""
+    assert await phase3_test_suite.test_domain_reputation_analysis() is True
+
+@pytest.mark.asyncio
+async def test_anomaly_detection(phase3_test_suite):
+    """Test anomaly detection"""
+    assert await phase3_test_suite.test_anomaly_detection() is True
+
+@pytest.mark.asyncio
+async def test_intelligence_correlation(phase3_test_suite):
+    """Test intelligence correlation"""
+    assert await phase3_test_suite.test_intelligence_correlation() is True
+
+@pytest.mark.asyncio
+async def test_entity_extraction(phase3_test_suite):
+    """Test entity extraction"""
+    assert await phase3_test_suite.test_entity_extraction() is True
+
+@pytest.mark.asyncio
+async def test_sentiment_analysis(phase3_test_suite):
+    """Test sentiment analysis"""
+    assert await phase3_test_suite.test_sentiment_analysis() is True
+
+@pytest.mark.asyncio
+async def test_text_summarization(phase3_test_suite):
+    """Test text summarization"""
+    assert await phase3_test_suite.test_text_summarization() is True
+
+@pytest.mark.asyncio
+async def test_intelligence_text_processing(phase3_test_suite):
+    """Test intelligence text processing"""
+    assert await phase3_test_suite.test_intelligence_text_processing() is True
+
 if __name__ == "__main__":
-    exit_code = asyncio.run(main())
+    pytest.main(["-v", __file__])

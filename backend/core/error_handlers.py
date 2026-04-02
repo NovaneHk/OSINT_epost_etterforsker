@@ -68,6 +68,11 @@ class ErrorResponse:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON response"""
         response = {
+            # Flat fields for FastAPI/frontend compatibility
+            "detail": self.message,
+            "error_code": self.error_type,
+            "timestamp": self.timestamp,
+            # Structured error envelope for detailed clients
             "error": {
                 "id": self.error_id,
                 "type": self.error_type,
@@ -268,7 +273,7 @@ class OSINTErrorHandler:
         # In development, include more details
         from backend.core.config import get_settings
         settings = get_settings()
-        if settings.environment == "development":
+        if settings.ENVIRONMENT == "development":
             details["database_error"] = str(exc)
 
         error_response = ErrorResponse(
@@ -303,7 +308,7 @@ class OSINTErrorHandler:
         # In development, include more details
         from backend.core.config import get_settings
         settings = get_settings()
-        if settings.environment == "development":
+        if settings.ENVIRONMENT == "development":
             details["error_message"] = str(exc)
             details["traceback"] = traceback.format_exc()
 

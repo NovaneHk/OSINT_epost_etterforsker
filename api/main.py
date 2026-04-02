@@ -1,6 +1,11 @@
 """
-FastAPI Server for OSINT Frontend
-Wrapper around existing CLI functionality with WebSocket support
+[LEGACY] FastAPI Server for OSINT Frontend
+
+This module is LEGACY and superseded by backend/main.py.
+It is preserved only for reference. The canonical backend entry point is:
+    backend.main:app
+
+Do not add new features here.
 """
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks, Query
@@ -22,6 +27,11 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from pydantic import BaseModel
 from core.config import ConfigManager
+from core.database import DatabaseManager
+try:
+    from core.db_postgres import PostgresDatabaseManager
+except ImportError:
+    PostgresDatabaseManager = None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -47,6 +57,16 @@ app.add_middleware(
 config_manager = ConfigManager()
 active_runs: Dict[str, Dict[str, Any]] = {}
 websocket_connections: List[WebSocket] = []
+
+# Database Initialization
+database_url = os.getenv("DATABASE_URL")
+if database_url and PostgresDatabaseManager:
+    logger.info("Initializing PostgreSQL Database Manager")
+    db_manager = PostgresDatabaseManager(database_url)
+else:
+    logger.info("Initializing SQLite Database Manager (Fallback)")
+    db_manager = DatabaseManager()
+
 
 # Pydantic models for API contracts
 class KPIResponse(BaseModel):
@@ -243,15 +263,8 @@ async def health_check():
 @app.get("/api/kpis", response_model=KPIResponse)
 async def get_kpis():
     """Get KPI metrics for dashboard"""
-    # Mock data for now - will be replaced with real data from database
-    return KPIResponse(
-        leads7d=1247,
-        hits7d=15430,
-        conversion_rate=8.1,
-        exports7d=23,
-        total_sources=42,
-        active_sources=38
-    )
+    stats = db_manager.get_kpi_stats()
+    return KPIResponse(**stats)
 
 @app.get("/api/leads")
 async def get_leads(
@@ -262,30 +275,20 @@ async def get_leads(
     minScore: Optional[float] = None
 ):
     """Get paginated leads with filtering"""
-    # Mock data for now
-    leads = []
-    for i in range(limit):
-        leads.append({
-            "id": f"lead_{i + (page-1)*limit}",
-            "email": f"user{i}@company{i}.com",
-            "name": f"Person {i}",
-            "company": f"Company {i}",
-            "title": "CTO",
-            "location": "Oslo, Norway",
-            "tags": ["technology", "b2b"],
-            "score": 85.5,
-            "sourceIds": ["src_1"],
-            "createdAt": datetime.now().isoformat(),
-            "updatedAt": datetime.now().isoformat()
-        })
-
+    offset = (page - 1) * limit
+    leads = db_manager.get_recent_leads(limit=limit, offset=offset)
+    
+    # Get total count (simplified for now)
+    # In a real app, we'd add a count method to db_manager
+    total = 1000 # Placeholder until we add count method
+    
     return {
         "data": leads,
         "pagination": {
             "page": page,
             "limit": limit,
-            "total": 10000,
-            "pages": 200
+            "total": total,
+            "pages": (total // limit) + 1
         },
         "filters": {
             "search": search,

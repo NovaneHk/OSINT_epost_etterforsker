@@ -7,6 +7,7 @@ import sqlite3
 import asyncio
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+from uuid import uuid4
 
 from .config import get_settings
 
@@ -50,6 +51,14 @@ class DatabaseManager:
             cursor.execute(query, params)
             conn.commit()
             return cursor.lastrowid
+
+    def execute_write(self, query: str, params: tuple = ()) -> int:
+        """Execute write query and return affected row count."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            conn.commit()
+            return cursor.rowcount
 
 
 # Global database manager
@@ -163,6 +172,30 @@ async def create_tables():
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS investigations (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        score REAL,
+        findings TEXT DEFAULT '[]',
+        error TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS playbooks (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        steps TEXT NOT NULL DEFAULT '[]',
+        status TEXT DEFAULT 'draft',
+        runs_count INTEGER DEFAULT 0,
+        success_rate REAL DEFAULT 0.0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS settings (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         key TEXT UNIQUE NOT NULL,
@@ -174,11 +207,65 @@ async def create_tables():
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        username TEXT UNIQUE,
+        full_name TEXT NOT NULL,
+        hashed_password TEXT NOT NULL,
+        role TEXT DEFAULT 'viewer',
+        status TEXT DEFAULT 'active',
+        is_active BOOLEAN DEFAULT 1,
+        is_verified BOOLEAN DEFAULT 1,
+        avatar_url TEXT,
+        bio TEXT,
+        company TEXT,
+        department TEXT,
+        job_title TEXT,
+        phone TEXT,
+        last_login_at TIMESTAMP,
+        login_count INTEGER DEFAULT 0,
+        password_changed_at TIMESTAMP,
+        mfa_secret TEXT,
+        mfa_enabled INTEGER DEFAULT 0,
+        mfa_backup_codes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_log (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        action TEXT,
+        resource_path TEXT,
+        method TEXT,
+        status_code INTEGER,
+        ip_address TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS lead_saved_views (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        filters TEXT NOT NULL,
+        scope TEXT DEFAULT 'private',
+        owner_user_id TEXT,
+        owner_role TEXT,
+        is_default BOOLEAN DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
     """
 
     try:
         with db_manager.get_connection() as conn:
             conn.executescript(comprehensive_schema)
+            _ensure_settings_schema_compatibility(conn)
+            _ensure_mfa_columns(conn)
+            _ensure_gdpr_columns(conn)
+            _ensure_indexes(conn)
+            _ensure_users_seeded(conn)
             conn.commit()
 
             # Insert sample data if sources table is empty
@@ -189,6 +276,125 @@ async def create_tables():
         print("Database tables created successfully")
     except Exception as e:
         print(f"Error creating tables: {e}")
+
+
+def _ensure_settings_schema_compatibility(conn):
+    """Ensure legacy settings schema remains compatible with API expectations."""
+    cursor = conn.execute("PRAGMA table_info(settings)")
+    columns = {row[1] for row in cursor.fetchall()}
+
+    if "is_public" not in columns:
+        conn.execute("ALTER TABLE settings ADD COLUMN is_public BOOLEAN DEFAULT 1")
+
+        if "is_sensitive" in columns:
+            conn.execute(
+                """
+                UPDATE settings
+                SET is_public = CASE
+                    WHEN is_sensitive = 1 THEN 0
+                    ELSE 1
+                END
+                WHERE is_public IS NULL
+                """
+            )
+
+    cursor = conn.execute("PRAGMA table_info(lead_saved_views)")
+    lead_saved_view_columns = {row[1] for row in cursor.fetchall()}
+
+    if "scope" not in lead_saved_view_columns:
+        conn.execute("ALTER TABLE lead_saved_views ADD COLUMN scope TEXT DEFAULT 'private'")
+    if "owner_user_id" not in lead_saved_view_columns:
+        conn.execute("ALTER TABLE lead_saved_views ADD COLUMN owner_user_id TEXT")
+    if "owner_role" not in lead_saved_view_columns:
+        conn.execute("ALTER TABLE lead_saved_views ADD COLUMN owner_role TEXT")
+
+
+def _ensure_mfa_columns(conn):
+    """Add MFA columns to users table if missing (idempotent for existing DBs)."""
+    cursor = conn.execute("PRAGMA table_info(users)")
+    existing = {row[1] for row in cursor.fetchall()}
+    for col, definition in [
+        ("mfa_secret", "TEXT"),
+        ("mfa_enabled", "INTEGER DEFAULT 0"),
+        ("mfa_backup_codes", "TEXT"),
+    ]:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {col} {definition}")
+
+
+def _ensure_gdpr_columns(conn):
+    """Add GDPR consent columns to leads table if missing."""
+    cursor = conn.execute("PRAGMA table_info(leads)")
+    existing = {row[1] for row in cursor.fetchall()}
+    if "gdpr_consent" not in existing:
+        conn.execute("ALTER TABLE leads ADD COLUMN gdpr_consent INTEGER DEFAULT 0")
+    if "gdpr_consent_date" not in existing:
+        conn.execute("ALTER TABLE leads ADD COLUMN gdpr_consent_date TIMESTAMP")
+
+
+def _ensure_indexes(conn):
+    """Create performance indexes and enable WAL mode."""
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    index_statements = [
+        "CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email)" if _table_exists(conn, "contacts") else None,
+        "CREATE INDEX IF NOT EXISTS idx_contacts_domain ON contacts(domain)" if _table_exists(conn, "contacts") else None,
+        "CREATE INDEX IF NOT EXISTS idx_contacts_company ON contacts(company)" if _table_exists(conn, "contacts") else None,
+        "CREATE INDEX IF NOT EXISTS idx_leads_email ON leads(email)",
+        "CREATE INDEX IF NOT EXISTS idx_leads_domain ON leads(domain)",
+        "CREATE INDEX IF NOT EXISTS idx_leads_industry ON leads(industry)",
+        "CREATE INDEX IF NOT EXISTS idx_leads_location ON leads(location)",
+        "CREATE INDEX IF NOT EXISTS idx_leads_score ON leads(verification_status, confidence_score DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_investigations_email ON investigations(email)",
+        "CREATE INDEX IF NOT EXISTS idx_investigations_status ON investigations(status)",
+        "CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id, created_at DESC)",
+    ]
+    for stmt in index_statements:
+        if stmt:
+            conn.execute(stmt)
+
+
+def _table_exists(conn, table_name: str) -> bool:
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,)
+    )
+    return cursor.fetchone() is not None
+
+
+def _ensure_users_seeded(conn):
+    """Create a default admin account for local development if needed."""
+    cursor = conn.execute("SELECT COUNT(*) FROM users")
+    user_count = cursor.fetchone()[0]
+    if user_count > 0 or not settings.SEED_DEFAULT_ADMIN:
+        return
+
+    from backend.core.security import password_hash
+
+    conn.execute(
+        """
+        INSERT INTO users (
+            id,
+            email,
+            username,
+            full_name,
+            hashed_password,
+            role,
+            status,
+            is_active,
+            is_verified,
+            login_count
+        ) VALUES (?, ?, ?, ?, ?, ?, 'active', 1, 1, 0)
+        """,
+        (
+            str(uuid4()),
+            settings.DEFAULT_ADMIN_EMAIL,
+            settings.DEFAULT_ADMIN_USERNAME,
+            settings.DEFAULT_ADMIN_FULL_NAME,
+            password_hash.hash_password(settings.DEFAULT_ADMIN_PASSWORD),
+            "admin",
+        )
+    )
 
 async def _insert_sample_sources(conn):
     """Insert sample sources data"""
@@ -232,18 +438,5 @@ async def check_database_health() -> bool:
 
 # Compatibility functions for FastAPI dependencies
 async def get_db_session():
-    """Get database session (mock for compatibility)"""
+    """Get database manager for dependency injection."""
     return db_manager
-
-
-# Mock AsyncSession for compatibility
-class MockAsyncSession:
-    """Mock async session for compatibility"""
-    def __init__(self, db_manager):
-        self.db_manager = db_manager
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        pass

@@ -95,6 +95,7 @@ class ConfigManager:
         return {
             'personas': {
                 'technical_leaders': {
+                    'description': 'Technical decision makers and engineering leadership',
                     'roles': [
                         'CTO', 'Tech Lead', 'VP Engineering', 'Head of Technology',
                         'Technical Director', 'Chief Technology Officer'
@@ -109,6 +110,7 @@ class ConfigManager:
                     'priority_level': 'high'
                 },
                 'procurement_specialists': {
+                    'description': 'Procurement, purchasing, and sourcing stakeholders',
                     'roles': [
                         'Procurement Manager', 'Purchasing Director',
                         'Supply Chain Manager', 'Buyer', 'Sourcing Manager'
@@ -123,9 +125,11 @@ class ConfigManager:
                     'priority_level': 'high'
                 },
                 'operations_leaders': {
+                    'description': 'Operations and execution-focused leadership roles',
                     'roles': [
                         'COO', 'Operations Manager', 'Head of Operations',
-                        'VP Operations', 'Operations Director'
+                        'VP Operations', 'Operations Director',
+                        'CEO', 'Founder', 'Co-Founder', 'Managing Director'
                     ],
                     'email_patterns': [
                         'ops@', 'operations@', 'coo@', 'admin@'
@@ -137,6 +141,7 @@ class ConfigManager:
                     'priority_level': 'medium'
                 },
                 'sales_leaders': {
+                    'description': 'Commercial and revenue leadership roles',
                     'roles': [
                         'Sales Director', 'VP Sales', 'Head of Sales',
                         'Business Development', 'Revenue Operations'

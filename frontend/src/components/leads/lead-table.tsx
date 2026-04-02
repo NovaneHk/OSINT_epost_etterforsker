@@ -329,7 +329,7 @@ export function LeadTable({
                   variant="ghost"
                   size="sm"
                   className="w-full justify-start"
-                  onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(lead.company)}`, '_blank')}
+                  onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(lead.company || '')}`, '_blank')}
                 >
                   <ExternalLink className="mr-2 h-4 w-4" />
                   Søk på bedrift
@@ -502,7 +502,7 @@ export function LeadTable({
       </div>
 
       {/* Virtual table */}
-      <div className="border rounded-md">
+      <div className="border rounded-md overflow-x-auto">
         <div
           ref={parentRef}
           className="h-[600px] overflow-auto"

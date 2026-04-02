@@ -3,6 +3,8 @@
  * Connects to status WebSocket endpoint and displays real-time system status
  */
 
+'use client';
+
 import React, { useEffect, useState, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
@@ -26,7 +28,7 @@ interface StatusData {
 }
 
 const DEFAULT_WS_URL = process.env.NEXT_PUBLIC_API_URL
-  ? `${process.env.NEXT_PUBLIC_API_URL.replace('http', 'ws')}/ws/status`
+  ? `${process.env.NEXT_PUBLIC_API_URL.replace('http', 'ws')}/api/ws/status`
   : 'ws://localhost:8000/api/ws/status';
 
 export function StatusClient({

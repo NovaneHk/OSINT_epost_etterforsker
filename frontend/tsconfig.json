@@ -35,5 +35,11 @@
     "**/*.tsx",
     ".next/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    "vitest.config.ts",
+    "src/lib/msw/**",
+    "src/mocks/**",
+    "src/test/**"
+  ]
 }

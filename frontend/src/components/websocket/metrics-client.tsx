@@ -3,6 +3,8 @@
  * Connects to metrics WebSocket endpoint and displays real-time metrics
  */
 
+'use client';
+
 import React, { useEffect, useState, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
@@ -27,7 +29,7 @@ interface MetricsData {
 }
 
 const DEFAULT_WS_URL = process.env.NEXT_PUBLIC_API_URL
-  ? `${process.env.NEXT_PUBLIC_API_URL.replace('http', 'ws')}/ws/metrics`
+  ? `${process.env.NEXT_PUBLIC_API_URL.replace('http', 'ws')}/api/ws/metrics`
   : 'ws://localhost:8000/api/ws/metrics';
 
 export function MetricsClient({

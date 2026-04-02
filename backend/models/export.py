@@ -22,6 +22,7 @@ class ExportFormat(str, Enum):
     JSON = "json"
     PDF = "pdf"
     XML = "xml"
+    MALTEGO = "maltego"
 
 
 class ExportStatus(str, Enum):

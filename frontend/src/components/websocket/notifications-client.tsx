@@ -3,6 +3,8 @@
  * Connects to notifications WebSocket endpoint and displays real-time system notifications
  */
 
+'use client';
+
 import React, { useEffect, useState, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
@@ -24,7 +26,7 @@ interface Notification {
 }
 
 const DEFAULT_WS_URL = process.env.NEXT_PUBLIC_API_URL
-  ? `${process.env.NEXT_PUBLIC_API_URL.replace('http', 'ws')}/ws/notifications`
+  ? `${process.env.NEXT_PUBLIC_API_URL.replace('http', 'ws')}/api/ws/notifications`
   : 'ws://localhost:8000/api/ws/notifications';
 
 export function NotificationsClient({

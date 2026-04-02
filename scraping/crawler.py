@@ -1,12 +1,3 @@
-class WebCrawler:
-    def __init__(self, *args, **kwargs):
-        self.rate_limit = kwargs.get('rate_limit', None)
-class CrawlResult:
-    def __init__(self, *args, **kwargs):
-        pass
-class RateLimiter:
-    def __init__(self, *args, **kwargs):
-        pass
 """
 OSINT Crawler System
 Main crawler orchestrator that manages different spider types
@@ -14,29 +5,224 @@ Main crawler orchestrator that manages different spider types
 
 import asyncio
 import logging
+import time
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 import subprocess
 import tempfile
 import json
 from datetime import datetime
+from dataclasses import dataclass, field
+
+import requests
 
 from core.config import ConfigManager
 from core.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
-# Placeholder class to resolve ImportError in tests
-class WebCrawler:
-    pass
 
-# Placeholder class to resolve ImportError in tests
-class CrawlResult:
-    pass
-
-# Placeholder class to resolve ImportError in tests
 class RateLimiter:
-    pass
+    """Controls request rate to avoid overloading servers."""
+
+    def __init__(self, requests_per_second: float = 1.0):
+        self.requests_per_second = requests_per_second
+        self.last_request_time: float = 0
+
+    def _calculate_wait_time(self) -> float:
+        """Calculate how long to wait before next request."""
+        if self.requests_per_second <= 0:
+            return 0.0
+        min_interval = 1.0 / self.requests_per_second
+        elapsed = time.time() - self.last_request_time
+        wait = min_interval - elapsed
+        return max(0.0, wait)
+
+    def wait_if_needed(self):
+        """Wait if needed to respect rate limit."""
+        wait = self._calculate_wait_time()
+        if wait > 0:
+            time.sleep(wait)
+        self.last_request_time = time.time()
+
+
+@dataclass
+class CrawlResult:
+    """Result of a single URL crawl."""
+    url: str
+    status_code: Optional[int] = None
+    content: Optional[str] = None
+    headers: Optional[Dict[str, str]] = None
+    response_time: float = 0.0
+    success: bool = False
+    error: Optional[str] = None
+    timestamp: Optional[datetime] = None
+
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.now()
+
+
+class WebCrawler:
+    """HTTP web crawler with rate limiting and retry support."""
+
+    def __init__(self,
+                 rate_limit: float = 1.0,
+                 timeout: int = 30,
+                 max_retries: int = 3,
+                 user_agent: str = "OSINT-B2B-Email-System/1.0"):
+        self.rate_limit = rate_limit
+        self.timeout = timeout
+        self.max_retries = max_retries
+        self.user_agent = user_agent
+        self.rate_limiter = RateLimiter(requests_per_second=rate_limit)
+        self.session = requests.Session()
+
+    def fetch_url(self, url: str) -> CrawlResult:
+        """Fetch a URL with retry logic."""
+        last_error = None
+        last_status = None
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                self.rate_limiter.wait_if_needed()
+                response = self.session.get(
+                    url,
+                    timeout=self.timeout,
+                    headers={'User-Agent': self.user_agent}
+                )
+                last_status = response.status_code  # capture before raise_for_status
+                elapsed = response.elapsed.total_seconds()
+                response.raise_for_status()
+                return CrawlResult(
+                    url=url,
+                    status_code=response.status_code,
+                    content=response.text,
+                    headers=dict(response.headers),
+                    response_time=elapsed,
+                    success=True,
+                )
+            except requests.exceptions.HTTPError as e:
+                last_error = f"HTTP error: {e}"
+                break  # don't retry HTTP errors
+            except requests.exceptions.Timeout:
+                last_error = "Timeout error"
+            except requests.exceptions.ConnectionError:
+                last_error = "Connection error"
+            except Exception as e:
+                last_error = str(e)
+
+        return CrawlResult(url=url, status_code=last_status, success=False, error=last_error)
+
+    def extract_links(self, html: str, base_url: str = "",
+                       allowed_domains: Optional[List[str]] = None,
+                       exclude_patterns: Optional[List[str]] = None) -> List[str]:
+        """Extract all http/https links from HTML content.
+
+        Args:
+            html: Raw HTML string.
+            base_url: Used to resolve relative URLs.
+            allowed_domains: If set, only links whose hostname is in this list are kept.
+            exclude_patterns: List of regex patterns; links matching any are excluded.
+        """
+        import re as _re
+        from urllib.parse import urlparse
+        from bs4 import BeautifulSoup
+        compiled_excludes = [_re.compile(p) for p in (exclude_patterns or [])]
+        try:
+            soup = BeautifulSoup(html, 'html.parser')
+            links = []
+            for tag in soup.find_all('a', href=True):
+                href = str(tag['href'])
+                url = self._normalize_url(href, base_url)
+                if url is None:
+                    continue
+                # allowed_domains filter
+                if allowed_domains:
+                    host = urlparse(url).hostname or ""
+                    if not any(host == d or host.endswith('.' + d) for d in allowed_domains):
+                        continue
+                # exclude_patterns filter
+                if any(p.search(url) for p in compiled_excludes):
+                    continue
+                links.append(url)
+            return links
+        except Exception:
+            return []
+
+    def crawl_site(self, start_url: str, max_pages: int = 10) -> List[CrawlResult]:
+        """Crawl a site up to max_pages."""
+        visited = set()
+        to_visit = [start_url]
+        results = []
+
+        while to_visit and len(results) < max_pages:
+            url = to_visit.pop(0)
+            if url in visited:
+                continue
+            visited.add(url)
+
+            result = self.fetch_url(url)
+            results.append(result)
+
+            if result.success and result.content:
+                links = self.extract_links(result.content, base_url=url)
+                for link in links:
+                    if link not in visited and link not in to_visit:
+                        to_visit.append(link)
+
+        return results
+
+    def _is_valid_url(self, url: str) -> bool:
+        """Return True only for http/https URLs with a non-empty netloc."""
+        from urllib.parse import urlparse
+        if not url:
+            return False
+        try:
+            parsed = urlparse(url)
+            return parsed.scheme in ('http', 'https') and bool(parsed.netloc)
+        except Exception:
+            return False
+
+    def _normalize_url(self, href: str, base_url: str = "") -> Optional[str]:
+        """Resolve *href* relative to *base_url* and return an absolute http/https URL.
+
+        Returns None if the result is not a valid http/https URL or if the href
+        is a fragment-only reference.
+        """
+        from urllib.parse import urlparse, urljoin
+        if not href:
+            return None
+        # Plain fragment — strip it; resolve to base URL without fragment
+        if href.startswith('#'):
+            if not base_url:
+                return None
+            url_no_frag = base_url.split('#')[0]
+            return url_no_frag if self._is_valid_url(url_no_frag) else None
+        # Query-only href like "?q=1" — join with base
+        if href.startswith('?'):
+            if not base_url:
+                return None
+            resolved = urljoin(base_url, href)
+            # Strip fragment from resolved
+            url_no_frag = resolved.split('#')[0]
+            return url_no_frag if self._is_valid_url(url_no_frag) else None
+        # Already absolute
+        if href.startswith('http://') or href.startswith('https://'):
+            url_no_frag = href.split('#')[0]
+            return url_no_frag if self._is_valid_url(url_no_frag) else None
+        # Relative path — requires base_url
+        if not base_url:
+            return None
+        resolved = urljoin(base_url, href)
+        url_no_frag = resolved.split('#')[0]
+        return url_no_frag if self._is_valid_url(url_no_frag) else None
+
+    def close(self) -> None:
+        """Close the underlying requests session and release connections."""
+        if self.session is not None:
+            self.session.close()
+
 
 class OSINTCrawler:
     """Main crawler orchestrator for OSINT data collection."""

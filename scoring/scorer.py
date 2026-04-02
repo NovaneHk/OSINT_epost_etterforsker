@@ -1,52 +1,337 @@
-class ScoreResult:
-    """Lightweight container for scoring results used in tests.
-
-    Accepts arbitrary keyword arguments and sets them as attributes so tests
-    can access fields like overall_score, confidence, best_persona, etc.
-    """
-    def __init__(self, *args, **kwargs):
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-
-class ScoreComponent:
-    def __init__(self, *args, **kwargs):
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-
-class PersonaMatch:
-    def __init__(self, *args, **kwargs):
-        for k, v in kwargs.items():
-            setattr(self, k, v)
 """
 Lead Scoring Module
 Advanced scoring system for email lead quality assessment
 """
 
+from dataclasses import dataclass, field
 import logging
+import math
+import time
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
-import math
-
-# Placeholder kept for backward compatibility
-class ScoringResult:
-    def __init__(self, *args, **kwargs):
-        for k, v in kwargs.items():
-            setattr(self, k, v)
 
 from core.config import ConfigManager
-from core.database import DatabaseManager
+from core.database import DatabaseManager, Contact, ContactStatus
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass
+class PersonaMatch:
+    persona_id: str
+    match_score: float
+    matched_criteria: List[str] = field(default_factory=list)
+    confidence: float = 0.0
+    reasoning: Optional[str] = None
+
+
+@dataclass
+class ScoreComponent:
+    name: str
+    score: float
+    weight: float
+    description: str = ""
+    details: dict = field(default_factory=dict)
+
+
+@dataclass
+class ScoreResult:
+    contact_email: str
+    overall_score: float
+    confidence: float = 0.0
+    domain_score: float = 0.0
+    role_score: float = 0.0
+    company_score: float = 0.0
+    persona_matches: List[PersonaMatch] = field(default_factory=list)
+    best_persona: Optional[str] = None
+    score_components: List[ScoreComponent] = field(default_factory=list)
+    calculation_time: float = 0.0
+    scoring_version: str = "1.0"
+    timestamp: Optional[datetime] = None
+
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.now()
+
+
+# backward compat
+ScoringResult = ScoreResult
+
+
 class LeadScorer:
     """Advanced scoring system for email lead quality."""
+
+    FREE_EMAIL_PROVIDERS = {
+        'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'live.com',
+        'aol.com', 'icloud.com', 'mail.com', 'protonmail.com', 'zoho.com',
+        'ymail.com', 'msn.com', 'yandex.com', 'gmx.com'
+    }
+
+    ROLE_SCORES = {
+        'cto': 1.0, 'ceo': 1.0, 'cfo': 0.9, 'coo': 0.9, 'president': 0.95,
+        'vp': 0.85, 'vice president': 0.85, 'director': 0.8,
+        'vp engineering': 1.0, 'vice president engineering': 1.0,
+        'head of': 0.8, 'chief': 0.9,
+        'manager': 0.6, 'lead': 0.65, 'senior': 0.55,
+        'software engineer': 0.7, 'engineer': 0.6,
+        'procurement': 0.75, 'purchasing': 0.7, 'buyer': 0.65,
+        'tech lead': 0.8, 'tech': 0.5,
+        'student': 0.1, 'intern': 0.15, 'janitor': 0.05,
+        'assistant': 0.2, 'admin': 0.3,
+    }
 
     def __init__(self, config_manager: ConfigManager):
         self.config_manager = config_manager
         self.db_manager = DatabaseManager()
         self.rules_config = config_manager.load_rules()
         self.personas_config = config_manager.load_personas()
-        self.default_weights = self._get_default_weights()
+        self.scoring_weights = self.rules_config.get('processing_rules', {}).get('scoring_weights', {
+            'persona_match': 0.4,
+            'domain_quality': 0.25,
+            'role_relevance': 0.20,
+            'email_validity': 0.15
+        })
+        self.personas = self.personas_config.get('personas', {})
+        # backward compat
+        self.default_weights = self.scoring_weights
+
+    def score_contact(self, contact: Contact) -> ScoreResult:
+        """Score a single contact and return a ScoreResult."""
+        start_time = time.perf_counter()
+
+        persona_matches = self._score_persona_matches(contact)
+        domain_comp = self._score_domain_quality(contact)
+        role_comp = self._score_role_relevance(contact)
+        validity_comp = self._score_email_validity(contact)
+
+        # Build persona_match component
+        best_pm = max(persona_matches, key=lambda m: m.match_score, default=None)
+        persona_score = best_pm.match_score if best_pm else 0.0
+        persona_comp = ScoreComponent(
+            name="persona_match",
+            score=persona_score,
+            weight=self.scoring_weights.get('persona_match', 0.4),
+            description="Persona alignment score",
+        )
+
+        components = [persona_comp, domain_comp, role_comp, validity_comp]
+        overall_score = self._calculate_overall_score(components)
+        confidence = self._calculate_confidence(contact, components)
+        best_persona = best_pm.persona_id if best_pm and best_pm.match_score >= 0.2 else None
+
+        calculation_time = time.perf_counter() - start_time
+        return ScoreResult(
+            contact_email=contact.email,
+            overall_score=overall_score,
+            confidence=confidence,
+            domain_score=domain_comp.score,
+            role_score=role_comp.score,
+            company_score=persona_score,
+            persona_matches=persona_matches,
+            best_persona=best_persona,
+            score_components=components,
+            calculation_time=calculation_time,
+        )
+
+    def _score_persona_matches(self, contact: Contact) -> List[PersonaMatch]:
+        """Score contact against all personas."""
+        matches = []
+        for persona_id, persona in self.personas.items():
+            matched_criteria, match_score = self._match_persona_criteria(contact, persona)
+            confidence = min(1.0, match_score * 1.1)
+            reasoning = f"Matched {len(matched_criteria)} criteria" if matched_criteria else "No match"
+            matches.append(PersonaMatch(
+                persona_id=persona_id,
+                match_score=match_score,
+                matched_criteria=matched_criteria,
+                confidence=confidence,
+                reasoning=reasoning,
+            ))
+        return matches
+
+    def _match_persona_criteria(self, contact: Contact, persona: dict):
+        """Match contact against a single persona, return (matched_criteria, score)."""
+        matched = []
+        score = 0.0
+        role = (contact.role or "").strip()
+        email = (contact.email or "").lower()
+
+        local_part = email.split('@')[0] if '@' in email else email
+
+        # Role matching
+        for target_role in persona.get('roles', []):
+            if target_role.lower() in role.lower():
+                matched.append(target_role)
+                score += 0.6
+
+        # Email pattern matching
+        for pattern in persona.get('email_patterns', []):
+            pat = pattern.replace('@', '').lower()
+            if pat in local_part:
+                matched.append(pattern)
+                score += 0.35
+
+        if local_part:
+            normalized_role = role.lower().replace(' ', '').replace('-', '')
+            normalized_local = local_part.lower().replace('.', '').replace('-', '')
+            if normalized_role and normalized_local and normalized_role in normalized_local:
+                matched.append(f"{local_part}@")
+                score += 0.2
+            elif any(token in normalized_local for token in ('cto', 'ceo', 'cfo', 'coo', 'vp', 'director', 'engineer', 'procurement', 'buyer')):
+                matched.append(f"{local_part}@")
+                score += 0.2
+
+        # Negative signals — penalize
+        for neg in persona.get('negative_signals', []):
+            if neg.lower().replace('@', '') in email.split('@')[0]:
+                score -= 0.25
+                break
+
+        score = max(0.0, min(1.0, score))
+        return matched, score
+
+    def _score_domain_quality(self, contact: Contact) -> ScoreComponent:
+        """Score email domain quality."""
+        domain = (contact.domain or contact.email.split('@')[-1] if contact.email else "").lower()
+        is_free = domain in self.FREE_EMAIL_PROVIDERS
+        domain_type = self._get_domain_type(domain)
+
+        if is_free:
+            score = 0.3
+        elif domain_type == "educational":
+            score = 0.6
+        elif domain_type == "government":
+            score = 0.7
+        elif domain_type == "organization":
+            score = 0.65
+        else:
+            score = 0.75
+
+        return ScoreComponent(
+            name="domain_quality",
+            score=score,
+            weight=self.scoring_weights.get('domain_quality', 0.25),
+            description="Domain reputation score",
+            details={"domain_type": domain_type, "is_free_provider": is_free, "domain": domain},
+        )
+
+    def _score_role_relevance(self, contact: Contact) -> ScoreComponent:
+        """Score role relevance for B2B leads."""
+        role = (contact.role or "").lower().strip()
+        score = 0.25  # default for unknown role
+
+        for key, val in self.ROLE_SCORES.items():
+            if key in role:
+                score = val
+                break
+
+        return ScoreComponent(
+            name="role_relevance",
+            score=score,
+            weight=self.scoring_weights.get('role_relevance', 0.20),
+            description="Role relevance for B2B leads",
+            details={"role": role},
+        )
+
+    def _score_email_validity(self, contact: Contact) -> ScoreComponent:
+        """Score email validity based on confidence and status."""
+        confidence = contact.confidence_score or 0.5
+        status = contact.status
+
+        if status == ContactStatus.VALIDATED:
+            score = min(1.0, confidence * 1.0 + 0.1)
+        elif status == ContactStatus.BOUNCED:
+            score = max(0.0, confidence * 0.2)
+        elif status == ContactStatus.OPTED_OUT:
+            score = 0.1
+        elif status == ContactStatus.INVALID:
+            score = 0.0
+        elif status == ContactStatus.CONTACTED:
+            score = min(1.0, confidence * 0.9)
+        else:
+            score = confidence * 0.6
+
+        return ScoreComponent(
+            name="email_validity",
+            score=score,
+            weight=self.scoring_weights.get('email_validity', 0.15),
+            description="Email validity and confidence",
+            details={"confidence": confidence, "status": str(status)},
+        )
+
+    def _calculate_overall_score(self, components: List[ScoreComponent]) -> float:
+        """Calculate weighted overall score from components."""
+        return sum(c.score * c.weight for c in components)
+
+    def _calculate_confidence(self, contact: Contact, components: List[ScoreComponent]) -> float:
+        """Calculate confidence in the scoring result."""
+        base_confidence = 0.3
+
+        # Data completeness bonus
+        if contact.name:
+            base_confidence += 0.15
+        if contact.role:
+            base_confidence += 0.15
+        if contact.company:
+            base_confidence += 0.1
+
+        # Contact's own confidence score
+        base_confidence += (contact.confidence_score or 0.0) * 0.2
+
+        # Score consistency (higher scores = more confidence)
+        avg_score = sum(c.score for c in components) / len(components) if components else 0
+        base_confidence += avg_score * 0.1
+
+        return max(0.0, min(1.0, base_confidence))
+
+    def _is_business_domain(self, domain: str) -> bool:
+        """Check if domain is a business domain (not free provider)."""
+        return domain.lower() not in self.FREE_EMAIL_PROVIDERS
+
+    def _get_domain_type(self, domain: str) -> str:
+        """Classify domain type."""
+        d = domain.lower()
+        if d in self.FREE_EMAIL_PROVIDERS:
+            return "free_provider"
+        if d.endswith('.edu') or 'university' in d or 'college' in d:
+            return "educational"
+        if d.endswith('.gov'):
+            return "government"
+        if d.endswith('.org') or d.endswith('.ngo') or d.endswith('.charity'):
+            return "organization"
+        return "business"
+
+    def score_contacts_batch(self, contacts: List[Contact]) -> List[ScoreResult]:
+        """Score multiple contacts in batch."""
+        return [self.score_contact(c) for c in contacts]
+
+    def get_score_explanation(self, result: ScoreResult) -> dict:
+        """Return a human-readable explanation of a score result."""
+        component_info = [
+            {"name": c.name, "score": c.score, "weight": c.weight, "weighted": c.score * c.weight}
+            for c in result.score_components
+        ]
+        reasoning = (
+            f"Overall score {result.overall_score:.2f} based on "
+            + ", ".join(f"{c['name']}={c['score']:.2f}" for c in component_info)
+        )
+        if result.best_persona:
+            reasoning += f". Best persona: {result.best_persona}"
+        return {
+            "overall_score": result.overall_score,
+            "confidence": result.confidence,
+            "best_persona": result.best_persona,
+            "components": component_info,
+            "reasoning": reasoning,
+        }
+
+    def update_scoring_weights(self, new_weights: Dict[str, float]) -> None:
+        """Update scoring weights. Raises ValueError if they don't sum to 1.0."""
+        total = sum(new_weights.values())
+        if abs(total - 1.0) > 0.01:
+            raise ValueError(f"Scoring weights must sum to 1.0, got {total:.3f}")
+        self.scoring_weights = dict(new_weights)
+        self.default_weights = self.scoring_weights
 
     def _get_default_weights(self) -> Dict[str, float]:
         """Get default scoring weights from configuration."""
@@ -60,57 +345,42 @@ class LeadScorer:
         })
 
     def score_all_leads(self, min_score: int = 70, weights: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
-        """Score all leads in the database."""
+        """Score all leads in the contacts table and persist results."""
 
-        if weights is None:
-            weights = self.default_weights
-
-        # Validate weights sum to 1.0
-        total_weight = sum(weights.values())
-        if abs(total_weight - 1.0) > 0.01:
-            logger.warning(f"Weights sum to {total_weight}, normalizing to 1.0")
-            weights = {k: v / total_weight for k, v in weights.items()}
-
-        # Get all emails with company information
-        emails = self.db_manager.get_emails(min_score=0)
-        companies = {c['id']: c for c in self.db_manager.get_companies()}
+        contacts = self.db_manager.get_all_contacts()
 
         total_leads = 0
         high_quality_leads = 0
         score_distribution = {'high': 0, 'medium': 0, 'low': 0}
 
-        logger.info(f"Starting scoring of {len(emails)} leads")
+        logger.info(f"Starting scoring of {len(contacts)} contacts")
 
-        for email_record in emails:
+        for contact in contacts:
             try:
-                # Get associated company data
-                company_id = email_record.get('company_id')
-                company_data = companies.get(company_id, {}) if company_id else {}
+                result = self.score_contact(contact)
 
-                # Calculate comprehensive score
-                score = self.calculate_lead_score(email_record, company_data, weights)
+                # Persist scored fields back to the contacts table
+                contact.overall_score = result.overall_score
+                contact.persona_match = result.best_persona
+                self.db_manager.add_contact(contact)  # upsert
 
-                # Update database with score
-                self.db_manager.update_email_score(email_record['id'], score)
-
-                # Update statistics
+                score_pct = result.overall_score * 100
                 total_leads += 1
-                if score >= min_score:
+                if score_pct >= min_score:
                     high_quality_leads += 1
 
-                # Categorize score
-                if score >= 80:
+                if score_pct >= 80:
                     score_distribution['high'] += 1
-                elif score >= 60:
+                elif score_pct >= 60:
                     score_distribution['medium'] += 1
                 else:
                     score_distribution['low'] += 1
 
                 if total_leads % 100 == 0:
-                    logger.info(f"Scored {total_leads}/{len(emails)} leads")
+                    logger.info(f"Scored {total_leads}/{len(contacts)} contacts")
 
             except Exception as e:
-                logger.error(f"Error scoring lead {email_record.get('email', 'unknown')}: {e}")
+                logger.error(f"Error scoring contact {getattr(contact, 'email', 'unknown')}: {e}")
                 total_leads += 1
 
         logger.info(f"Scoring completed. {high_quality_leads}/{total_leads} leads above threshold")
@@ -120,7 +390,6 @@ class LeadScorer:
             'high_quality_leads': high_quality_leads,
             'quality_rate': (high_quality_leads / total_leads * 100) if total_leads > 0 else 0,
             'score_distribution': score_distribution,
-            'weights_used': weights
         }
 
     def calculate_lead_score(self, email_data: Dict[str, Any], company_data: Dict[str, Any],

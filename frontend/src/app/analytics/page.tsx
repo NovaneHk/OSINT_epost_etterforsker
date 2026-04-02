@@ -37,7 +37,9 @@ export default function AnalyticsPage() {
     const connectWebSocket = () => {
       try {
         // In production, use proper WebSocket URL
-        ws = new WebSocket('ws://localhost:8000/api/analytics/ws')
+        const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+        const wsBase = apiBase.replace(/^http/, 'ws')
+        ws = new WebSocket(`${wsBase}/api/analytics/ws`)
 
         ws.onopen = () => {
           console.log('WebSocket connected')
@@ -86,49 +88,17 @@ export default function AnalyticsPage() {
     }
   }, [])
 
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
   const fetchDashboardData = async () => {
     try {
-      // Simulate API call - in production, use actual API
-      const mockData = {
-        overview: {
-          total_investigations: 1247,
-          active_threats: 23,
-          risk_score_average: 0.34,
-          processing_speed: 156
-        },
-        ai_analytics: {
-          ai_engine: {
-            summary: {
-              total_analyses: 5432,
-              average_confidence: 0.87,
-              average_processing_time: 67
-            },
-            health: {
-              status: 'healthy',
-              ml_available: false,
-              models_loaded: 0
-            }
-          },
-          nlp_processor: {
-            health: {
-              status: 'healthy',
-              nlp_available: false,
-              patterns_loaded: 7
-            }
-          }
-        },
-        system_health: {
-          status: 'healthy',
-          uptime: '99.8%',
-          components: {
-            database: 'healthy',
-            ai_engine: 'degraded',
-            api: 'healthy',
-            frontend: 'healthy'
-          }
-        }
-      }
-      setDashboardData(mockData)
+      const token = typeof window !== 'undefined'
+        ? (document.cookie.match(/(?:^|;\s*)token=([^;]*)/))?.[1] || localStorage.getItem('accessToken')
+        : null
+      const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {}
+      const res = await fetch(`${apiBase}/api/analytics/dashboard/overview`, { headers })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setDashboardData(await res.json())
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error)
     }
@@ -136,35 +106,13 @@ export default function AnalyticsPage() {
 
   const fetchThreatsData = async () => {
     try {
-      // Simulate threats data
-      const mockThreats = {
-        active_threats: [
-          {
-            id: 'threat_001',
-            type: 'phishing_email',
-            severity: 'high',
-            source: 'suspicious-domain.tk',
-            risk_score: 0.89
-          },
-          {
-            id: 'threat_002',
-            type: 'domain_reputation',
-            severity: 'medium',
-            source: 'example-bad.com',
-            risk_score: 0.67
-          }
-        ],
-        threat_trends: {
-          hourly_detections: [12, 8, 15, 23, 18, 9, 14, 19, 25, 16, 11, 20]
-        },
-        severity_breakdown: {
-          critical: 5,
-          high: 18,
-          medium: 34,
-          low: 67
-        }
-      }
-      setThreatsData(mockThreats)
+      const token = typeof window !== 'undefined'
+        ? (document.cookie.match(/(?:^|;\s*)token=([^;]*)/))?.[1] || localStorage.getItem('accessToken')
+        : null
+      const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {}
+      const res = await fetch(`${apiBase}/api/analytics/threats/realtime`, { headers })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setThreatsData(await res.json())
     } catch (error) {
       console.error('Failed to fetch threats data:', error)
     }
@@ -172,25 +120,13 @@ export default function AnalyticsPage() {
 
   const fetchPerformanceData = async () => {
     try {
-      // Simulate performance data
-      const mockPerformance = {
-        processing_performance: {
-          emails_per_minute: 156,
-          domains_per_minute: 89,
-          average_processing_time: '67ms',
-          success_rate: '99.2%'
-        },
-        system_resources: {
-          cpu_usage: '34%',
-          memory_usage: '68%',
-          disk_usage: '45%'
-        },
-        ai_model_performance: {
-          status: 'unavailable',
-          message: 'AI components not installed'
-        }
-      }
-      setPerformanceData(mockPerformance)
+      const token = typeof window !== 'undefined'
+        ? (document.cookie.match(/(?:^|;\s*)token=([^;]*)/))?.[1] || localStorage.getItem('accessToken')
+        : null
+      const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {}
+      const res = await fetch(`${apiBase}/api/analytics/performance/metrics`, { headers })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setPerformanceData(await res.json())
     } catch (error) {
       console.error('Failed to fetch performance data:', error)
     }

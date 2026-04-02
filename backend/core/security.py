@@ -4,7 +4,7 @@ JWT authentication, password hashing, and security utilities
 """
 
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Union
 
 import bcrypt
@@ -64,6 +64,8 @@ class JWTManager:
         self.secret_key = settings.JWT_SECRET_KEY
         self.access_token_expire_minutes = settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
         self.refresh_token_expire_days = settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS
+        # JTI revocation blacklist: {jti: expire_timestamp}
+        self._revoked_jtis: dict[str, float] = {}
 
     def create_access_token(
         self,
@@ -73,18 +75,17 @@ class JWTManager:
         expires_delta: Optional[timedelta] = None
     ) -> str:
         """Create an access token"""
+        now = datetime.now(timezone.utc)
         if expires_delta:
-            expire = datetime.utcnow() + expires_delta
+            expire = now + expires_delta
         else:
-            expire = datetime.utcnow() + timedelta(minutes=self.access_token_expire_minutes)
-
-        now = datetime.utcnow()
+            expire = now + timedelta(minutes=self.access_token_expire_minutes)
         jti = secrets.token_urlsafe(32)
 
         payload = {
             "sub": user_id,
-            "exp": expire.timestamp(),
-            "iat": now.timestamp(),
+            "exp": int(expire.timestamp()),
+            "iat": int(now.timestamp()),
             "jti": jti,
             "type": "access",
             "role": role,
@@ -100,18 +101,17 @@ class JWTManager:
         expires_delta: Optional[timedelta] = None
     ) -> str:
         """Create a refresh token"""
+        now = datetime.now(timezone.utc)
         if expires_delta:
-            expire = datetime.utcnow() + expires_delta
+            expire = now + expires_delta
         else:
-            expire = datetime.utcnow() + timedelta(days=self.refresh_token_expire_days)
-
-        now = datetime.utcnow()
+            expire = now + timedelta(days=self.refresh_token_expire_days)
         jti = secrets.token_urlsafe(32)
 
         payload = {
             "sub": user_id,
-            "exp": expire.timestamp(),
-            "iat": now.timestamp(),
+            "exp": int(expire.timestamp()),
+            "iat": int(now.timestamp()),
             "jti": jti,
             "type": "refresh",
             "role": role,
@@ -140,7 +140,15 @@ class JWTManager:
         """Decode and validate a JWT token"""
         try:
             payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
-            return TokenData(**payload)
+            token_data = TokenData(**payload)
+            # Check revocation blacklist
+            if token_data.jti in self._revoked_jtis:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Token has been revoked",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            return token_data
         except jwt.ExpiredSignatureError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -174,6 +182,13 @@ class JWTManager:
             permissions=permissions
         )
 
+    def revoke_token(self, jti: str, expire_at: float) -> None:
+        """Add a JTI to the revocation blacklist."""
+        self._revoked_jtis[jti] = expire_at
+        # Clean up expired entries to prevent unbounded growth
+        now = datetime.now(timezone.utc).timestamp()
+        self._revoked_jtis = {k: v for k, v in self._revoked_jtis.items() if v > now}
+
 
 class PermissionManager:
     """Role-based access control and permission management"""
@@ -193,6 +208,7 @@ class PermissionManager:
             "read:sources",
             "read:campaigns",
             "read:exports",
+            "read:runs",
             "read:search_results"
         ],
         "ANALYST": [
@@ -201,6 +217,7 @@ class PermissionManager:
             "read:sources",
             "read:campaigns",
             "read:exports",
+            "read:runs",
             "read:search_results",
             # Analyst permissions
             "create:leads",
@@ -208,6 +225,7 @@ class PermissionManager:
             "create:search_results",
             "update:search_results",
             "create:exports",
+            "create:runs",
             "execute:osint_searches"
         ],
         "MANAGER": [
@@ -216,12 +234,14 @@ class PermissionManager:
             "read:sources",
             "read:campaigns",
             "read:exports",
+            "read:runs",
             "read:search_results",
             "create:leads",
             "update:leads",
             "create:search_results",
             "update:search_results",
             "create:exports",
+            "create:runs",
             "execute:osint_searches",
             # Manager permissions
             "create:campaigns",
@@ -230,6 +250,7 @@ class PermissionManager:
             "create:sources",
             "update:sources",
             "delete:sources",
+            "update:runs",
             "manage:team_campaigns",
             "read:user_activities"
         ],
@@ -239,12 +260,14 @@ class PermissionManager:
             "read:sources",
             "read:campaigns",
             "read:exports",
+            "read:runs",
             "read:search_results",
             "create:leads",
             "update:leads",
             "create:search_results",
             "update:search_results",
             "create:exports",
+            "create:runs",
             "execute:osint_searches",
             "create:campaigns",
             "update:campaigns",
@@ -252,6 +275,7 @@ class PermissionManager:
             "create:sources",
             "update:sources",
             "delete:sources",
+            "update:runs",
             "manage:team_campaigns",
             "read:user_activities",
             # Admin permissions
@@ -263,6 +287,7 @@ class PermissionManager:
             "delete:leads",
             "delete:search_results",
             "delete:exports",
+            "delete:runs",
             "system:administration",
             "system:monitoring"
         ]

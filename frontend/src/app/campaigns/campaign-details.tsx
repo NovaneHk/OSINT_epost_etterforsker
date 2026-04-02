@@ -7,9 +7,10 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ArrowLeft, Play, Pause, Edit, BarChart3, Users, Target, Calendar, Settings, Download } from 'lucide-react'
 import { toast } from "sonner"
+import { api } from '@/lib/api'
 
 interface Campaign {
-  id: number
+  id: string
   name: string
   description: string
   status: string
@@ -47,29 +48,22 @@ export default function CampaignDetails({ campaign, onBack, onUpdate }: Campaign
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    fetchCampaignDetails()
     fetchCampaignLeads()
   }, [campaign.id])
 
-  const fetchCampaignDetails = async () => {
-    try {
-      const response = await fetch(`/api/campaigns/${campaign.id}/stats`)
-      if (response.ok) {
-        const data = await response.json()
-        setStats(data)
-      }
-    } catch (error) {
-      console.error('Error fetching campaign stats:', error)
-    }
-  }
-
   const fetchCampaignLeads = async () => {
     try {
-      const response = await fetch(`/api/leads?campaign_id=${campaign.id}`)
-      if (response.ok) {
-        const data = await response.json()
-        setLeads(data)
-      }
+      const data = await api.getLeads({ campaign_id: String(campaign.id) })
+      setLeads(data.data.map((lead) => ({
+        id: Number(lead.id),
+        email: lead.email,
+        name: lead.name || '',
+        company: lead.company || '',
+        job_title: lead.job_title || lead.title || '',
+        confidence_score: Number(lead.confidence_score || lead.score || 0),
+        verification_status: lead.verification_status,
+        created_at: lead.created_at,
+      })))
     } catch (error) {
       console.error('Error fetching campaign leads:', error)
     } finally {
@@ -79,16 +73,9 @@ export default function CampaignDetails({ campaign, onBack, onUpdate }: Campaign
 
   const handleStart = async () => {
     try {
-      const response = await fetch(`/api/campaigns/${campaign.id}/start`, {
-        method: 'POST'
-      })
-
-      if (response.ok) {
-        toast.success('Campaign started successfully')
-        onUpdate()
-      } else {
-        toast.error('Failed to start campaign')
-      }
+      await api.startCampaign(String(campaign.id))
+      toast.success('Campaign started successfully')
+      onUpdate()
     } catch (error) {
       console.error('Error starting campaign:', error)
       toast.error('Error starting campaign')
@@ -97,16 +84,9 @@ export default function CampaignDetails({ campaign, onBack, onUpdate }: Campaign
 
   const handlePause = async () => {
     try {
-      const response = await fetch(`/api/campaigns/${campaign.id}/pause`, {
-        method: 'POST'
-      })
-
-      if (response.ok) {
-        toast.success('Campaign paused successfully')
-        onUpdate()
-      } else {
-        toast.error('Failed to pause campaign')
-      }
+      await api.pauseCampaign(String(campaign.id))
+      toast.success('Campaign paused successfully')
+      onUpdate()
     } catch (error) {
       console.error('Error pausing campaign:', error)
       toast.error('Error pausing campaign')

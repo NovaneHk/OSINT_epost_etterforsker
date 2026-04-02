@@ -28,6 +28,37 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 
+def validate_runtime_configuration() -> None:
+    """Validate critical runtime configuration before serving traffic."""
+    required_settings = ["DATABASE_URL", "SECRET_KEY", "JWT_SECRET_KEY"]
+    missing = [name for name in required_settings if not getattr(settings, name, None)]
+    if missing:
+        raise RuntimeError(f"Missing required runtime settings: {', '.join(missing)}")
+
+    placeholder_values = {"your-secret-key-change-in-production", "CHANGE_THIS"}
+    if settings.ENVIRONMENT == "production":
+        invalid = [
+            name for name in ["SECRET_KEY", "JWT_SECRET_KEY"]
+            if str(getattr(settings, name, "")) in placeholder_values
+        ]
+        if invalid:
+            raise RuntimeError(f"Production secrets still use placeholder values: {', '.join(invalid)}")
+
+        if settings.ALLOWED_HOSTS == ["*"]:
+            raise RuntimeError("ALLOWED_HOSTS cannot be wildcard in production")
+
+    if settings.CORS_ORIGINS == ["*"]:
+        logger.warning("CORS_ORIGINS uses wildcard origin; credentialed cross-origin requests will be disabled")
+
+
+def get_cors_configuration() -> tuple[list[str], bool]:
+    """Return a safe CORS configuration for FastAPI middleware."""
+    origins = settings.CORS_ORIGINS or ["*"]
+    if "*" in origins:
+        return ["*"], False
+    return origins, True
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager for startup and shutdown events"""
@@ -35,6 +66,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("🚀 Starting OSINT E-post Etterforsker Backend")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info(f"Debug mode: {settings.DEBUG}")
+
+    validate_runtime_configuration()
 
     # Initialize database
     if settings.CREATE_TABLES_ON_STARTUP:
@@ -54,6 +87,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 def create_application() -> FastAPI:
     """Create and configure FastAPI application"""
+
+    cors_origins, allow_credentials = get_cors_configuration()
 
     app = FastAPI(
         title=settings.PROJECT_NAME,
@@ -75,8 +110,8 @@ def create_application() -> FastAPI:
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS,
-        allow_credentials=True,
+        allow_origins=cors_origins,
+        allow_credentials=allow_credentials,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
         allow_headers=["*"],
         expose_headers=["X-Total-Count", "X-Page-Count"]
