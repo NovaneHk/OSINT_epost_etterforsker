@@ -304,6 +304,128 @@ async def spiderfoot_scan(
 
 
 # ---------------------------------------------------------------------------
+# Metagoofil
+# ---------------------------------------------------------------------------
+
+class MetagoofilScanRequest(BaseModel):
+    target: str  # domain to search
+
+
+@router.post("/metagoofil/scan", summary="Extract metadata from public documents via Metagoofil")
+async def metagoofil_scan(
+    payload: MetagoofilScanRequest,
+    current_user: AuthenticatedUser = Depends(get_current_active_user),
+):
+    """Uses Metagoofil to download and parse public documents for *target* domain.
+    Requires the ``metagoofil`` CLI tool to be installed on PATH."""
+    try:
+        import sys
+        sys.path.insert(0, ".")
+        from integrations.metagoofil_connector import MetagoofilConnector  # type: ignore
+        connector = MetagoofilConnector()
+        if not connector.is_available():
+            raise HTTPException(status_code=503, detail="metagoofil not found on PATH — install it first")
+        result = await connector.search(payload.target)
+        return {
+            "target": payload.target,
+            "success": result.success,
+            "emails": result.emails,
+            "domains": result.domains,
+            "authors": result.additional_data.get("authors", []),
+            "software": result.additional_data.get("software", []),
+            "documents_downloaded": result.additional_data.get("documents_downloaded", 0),
+            "error": result.error,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Metagoofil scan error")
+        raise HTTPException(status_code=502, detail=f"Metagoofil error: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# PwnDB
+# ---------------------------------------------------------------------------
+
+class PwnDBCheckRequest(BaseModel):
+    target: str  # email address or domain
+
+
+@router.post("/pwndb/check", summary="Check email/domain against PwnDB dark-web breach database via Tor")
+async def pwndb_check(
+    payload: PwnDBCheckRequest,
+    current_user: AuthenticatedUser = Depends(get_current_active_user),
+):
+    """Queries PwnDB over Tor. Requires Tor service running on port 9050."""
+    try:
+        import sys
+        sys.path.insert(0, ".")
+        from integrations.pwndb_connector import PwnDBConnector  # type: ignore
+        tor_proxy = getattr(settings, "PWNDB_TOR_PROXY", "socks5h://127.0.0.1:9050")
+        connector = PwnDBConnector(tor_proxy=tor_proxy)
+        if not connector.is_available():
+            raise HTTPException(
+                status_code=503,
+                detail="Tor not available on port 9050 — start the Tor service first",
+            )
+        result = await connector.search(payload.target)
+        return {
+            "target": payload.target,
+            "success": result.success,
+            "breach_count": result.additional_data.get("breach_count", 0),
+            "leaks": result.additional_data.get("leaks", []),
+            "error": result.error,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("PwnDB check error")
+        raise HTTPException(status_code=502, detail=f"PwnDB error: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# NovaNexus
+# ---------------------------------------------------------------------------
+
+class NovaNexusPushRequest(BaseModel):
+    lead_ids: list[int]
+    campaign_id: Optional[str] = None
+
+
+@router.post("/novanexus/push", summary="Push scored leads to NovaNexus CRM")
+async def novanexus_push(
+    payload: NovaNexusPushRequest,
+    db: DatabaseSession,
+    current_user: PermissionDeps.CreateLeads,
+):
+    """Looks up each *lead_id* in the DB and pushes the records to NovaNexus."""
+    _require_env("NOVANEXUS_API_URL", "NOVANEXUS_API_KEY", integration="NovaNexus")
+    leads = []
+    for lead_id in payload.lead_ids:
+        rows = db.execute_query("SELECT * FROM leads WHERE id = ?", (lead_id,))
+        if not rows:
+            raise HTTPException(status_code=404, detail=f"Lead {lead_id} not found")
+        leads.append(dict(rows[0]) if hasattr(rows[0], "keys") else rows[0])
+
+    try:
+        import sys
+        sys.path.insert(0, ".")
+        from integrations.novanexus_connector import NovaNexusConnector  # type: ignore
+        connector = NovaNexusConnector(
+            api_url=getattr(settings, "NOVANEXUS_API_URL", ""),
+            api_key=getattr(settings, "NOVANEXUS_API_KEY", ""),
+            campaign_id=payload.campaign_id or getattr(settings, "NOVANEXUS_CAMPAIGN_ID", None),
+        )
+        result = await connector.import_leads(leads)
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("NovaNexus push error")
+        raise HTTPException(status_code=502, detail=f"NovaNexus error: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # Status overview
 # ---------------------------------------------------------------------------
 
@@ -311,6 +433,16 @@ async def spiderfoot_scan(
 async def integration_status():
     def _configured(*names: str) -> bool:
         return all(bool(getattr(settings, n, None)) for n in names)
+
+    import shutil, socket
+
+    def _tor_available() -> bool:
+        try:
+            s = socket.create_connection(("127.0.0.1", 9050), timeout=1)
+            s.close()
+            return True
+        except OSError:
+            return False
 
     return {
         "n8n": {
@@ -344,5 +476,17 @@ async def integration_status():
         "reconng": {
             "configured": bool(getattr(settings, "RECONNG_PATH", None)) or True,
             "description": "Recon-ng (requires recon-ng on PATH)",
+        },
+        "metagoofil": {
+            "configured": bool(shutil.which("metagoofil")),
+            "description": "Metagoofil document metadata extraction",
+        },
+        "pwndb": {
+            "configured": _tor_available(),
+            "description": "PwnDB dark-web breach database (via Tor)",
+        },
+        "novanexus": {
+            "configured": _configured("NOVANEXUS_API_URL", "NOVANEXUS_API_KEY"),
+            "description": "NovaNexus CRM lead import",
         },
     }

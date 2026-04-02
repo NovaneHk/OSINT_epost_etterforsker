@@ -13,7 +13,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.responses import Response
 
 from backend.core.config import get_settings
 from backend.core.database import create_tables, close_db_connections
@@ -95,16 +97,39 @@ def create_application() -> FastAPI:
 
     cors_origins, allow_credentials = get_cors_configuration()
 
+    _docs_enabled = settings.DEBUG or settings.ENABLE_ADMIN_DOCS
+
     app = FastAPI(
         title=settings.PROJECT_NAME,
         description=settings.PROJECT_DESCRIPTION,
         version=settings.VERSION,
         debug=settings.DEBUG,
         lifespan=lifespan,
-        docs_url="/api/docs" if settings.DEBUG else None,
-        redoc_url="/api/redoc" if settings.DEBUG else None,
-        openapi_url="/api/openapi.json" if settings.DEBUG else None,
+        docs_url="/api/docs" if _docs_enabled else None,
+        redoc_url="/api/redoc" if _docs_enabled else None,
+        openapi_url="/api/openapi.json" if _docs_enabled else None,
     )
+
+    # In non-debug mode, guard /api/docs, /api/redoc, /api/openapi.json
+    # behind the ADMIN_DOCS_TOKEN header so they are not publicly accessible.
+    if settings.ENABLE_ADMIN_DOCS and not settings.DEBUG:
+        _docs_paths = {"/api/docs", "/api/redoc", "/api/openapi.json"}
+
+        class AdminDocsGuard(BaseHTTPMiddleware):
+            async def dispatch(self, request: Request, call_next) -> Response:
+                if request.url.path in _docs_paths:
+                    auth = request.headers.get("Authorization", "")
+                    token = auth.removeprefix("Bearer ").strip()
+                    expected = settings.ADMIN_DOCS_TOKEN or ""
+                    if not expected or token != expected:
+                        return JSONResponse(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            content={"detail": "Admin docs require a valid Authorization: Bearer <ADMIN_DOCS_TOKEN>"},
+                            headers={"WWW-Authenticate": "Bearer"},
+                        )
+                return await call_next(request)
+
+        app.add_middleware(AdminDocsGuard)
 
     # Security middleware
     app.add_middleware(

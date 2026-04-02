@@ -96,6 +96,14 @@ class Settings:
     SMTP_USERNAME: Optional[str] = None
     SMTP_PASSWORD: Optional[str] = None
 
+    # NovaNexus
+    NOVANEXUS_API_URL: Optional[str] = None
+    NOVANEXUS_API_KEY: Optional[str] = None
+    NOVANEXUS_CAMPAIGN_ID: Optional[str] = None
+
+    # PwnDB (Tor proxy)
+    PWNDB_TOR_PROXY: str = "socks5h://127.0.0.1:9050"
+
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE: Optional[str] = None
@@ -109,6 +117,8 @@ class Settings:
     DEFAULT_ADMIN_USERNAME: str = "admin"
     DEFAULT_ADMIN_PASSWORD: str = "Admin1234"
     DEFAULT_ADMIN_FULL_NAME: str = "System Administrator"
+    ENABLE_ADMIN_DOCS: bool = False     # expose /api/docs in prod with token
+    ADMIN_DOCS_TOKEN: Optional[str] = None  # required when ENABLE_ADMIN_DOCS=true
 
     def __init__(self):
         """Initialize settings from environment variables"""
@@ -149,6 +159,12 @@ class Settings:
         self.M365_TENANT_ID = os.getenv("M365_TENANT_ID", self.M365_TENANT_ID)
         self.M365_CLIENT_ID = os.getenv("M365_CLIENT_ID", self.M365_CLIENT_ID)
         self.M365_CLIENT_SECRET = os.getenv("M365_CLIENT_SECRET", self.M365_CLIENT_SECRET)
+        self.NOVANEXUS_API_URL = os.getenv("NOVANEXUS_API_URL", self.NOVANEXUS_API_URL)
+        self.NOVANEXUS_API_KEY = os.getenv("NOVANEXUS_API_KEY", self.NOVANEXUS_API_KEY)
+        self.NOVANEXUS_CAMPAIGN_ID = os.getenv("NOVANEXUS_CAMPAIGN_ID", self.NOVANEXUS_CAMPAIGN_ID)
+        self.PWNDB_TOR_PROXY = os.getenv("PWNDB_TOR_PROXY", self.PWNDB_TOR_PROXY)
+        self.ENABLE_ADMIN_DOCS = os.getenv("ENABLE_ADMIN_DOCS", "false").lower() == "true"
+        self.ADMIN_DOCS_TOKEN = os.getenv("ADMIN_DOCS_TOKEN", self.ADMIN_DOCS_TOKEN)
 
         if self.SECRET_KEY == "your-secret-key-change-in-production":
             self.SECRET_KEY = self._build_secret("SECRET_KEY")

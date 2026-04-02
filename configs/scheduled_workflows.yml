@@ -1,0 +1,28 @@
+# Scheduled Workflow Configuration
+# Entries here are loaded by WorkflowEngine._load_scheduled_workflows()
+# Each key must match a workflow template name (see configs/workflows/*.yml
+# or the built-in templates: daily_intelligence, threat_analysis).
+#
+# schedule: standard cron expression  (minute hour dom month dow)
+# enabled:  true | false
+# default_query: the target domain / query to pass to the workflow
+
+workflows:
+
+  # -----------------------------------------------------------------------
+  # Daily intelligence run — every day at 09:00 local time
+  # -----------------------------------------------------------------------
+  daily_intelligence:
+    schedule: "0 9 * * *"
+    enabled: true
+    default_query: "example.com"      # override via env or UI before going live
+    description: "Automated daily OSINT collection, breach-check and contact scoring"
+
+  # -----------------------------------------------------------------------
+  # Weekly threat-intelligence sweep — every Monday at 07:30
+  # -----------------------------------------------------------------------
+  threat_analysis:
+    schedule: "30 7 * * 1"
+    enabled: true
+    default_query: "example.com"
+    description: "Weekly domain scan + IntelOwl threat-intelligence sweep"
