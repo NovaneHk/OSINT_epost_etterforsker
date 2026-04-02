@@ -23,8 +23,14 @@ class DatabaseManager:
 
     def _get_db_path(self) -> str:
         """Get database path from settings"""
-        if settings.DATABASE_URL.startswith("sqlite://"):
-            return settings.DATABASE_URL.replace("sqlite://", "")
+        db_url = settings.DATABASE_URL
+        if db_url.startswith("sqlite:///"):
+            # sqlite:///path → "path" (relative from cwd or absolute if starting with /)
+            # e.g. sqlite:////app/data/foo.db → /app/data/foo.db (absolute when 4 slashes used)
+            #      sqlite:///data/foo.db → "data/foo.db" (relative — resolved from cwd)
+            return db_url[len("sqlite:///"):]
+        if db_url.startswith("sqlite://"):
+            return db_url[len("sqlite://"):]
         return "data/osint_cache.db"
 
     def _ensure_db_directory(self):
