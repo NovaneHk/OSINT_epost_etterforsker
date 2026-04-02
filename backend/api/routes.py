@@ -29,6 +29,8 @@ from backend.api import (
     nlq,
     integrations,
     gdpr,
+    scheduler,
+    reports,
 )
 
 # Create main API router
@@ -56,6 +58,8 @@ api_router.include_router(audit.router)
 api_router.include_router(nlq.router)
 api_router.include_router(integrations.router)
 api_router.include_router(gdpr.router)
+api_router.include_router(scheduler.router)
+api_router.include_router(reports.router)
 
 
 # Root endpoints

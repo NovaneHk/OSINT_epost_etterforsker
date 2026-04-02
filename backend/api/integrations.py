@@ -154,6 +154,81 @@ async def m365_sync(payload: CRMPushRequest, db: DatabaseSession, current_user: 
 
 
 # ---------------------------------------------------------------------------
+# IntelOwl
+# ---------------------------------------------------------------------------
+
+class IntelOwlAnalyzeRequest(BaseModel):
+    target: str
+    scan_type: str = "email"  # email | domain | ip
+
+
+@router.post("/intelowl/analyze", summary="Analyze a target with IntelOwl threat intelligence")
+async def intelowl_analyze(
+    payload: IntelOwlAnalyzeRequest,
+    current_user: AuthenticatedUser = Depends(get_current_active_user),
+):
+    """Submits *target* as an observable to IntelOwl. Requires IntelOwl running locally."""
+    _require_env("INTELOWL_API_KEY", integration="IntelOwl")
+    try:
+        import sys
+        sys.path.insert(0, ".")
+        from integrations.intelowl_connector import IntelOwlConnector  # type: ignore
+        io_url = getattr(settings, "INTELOWL_URL", "http://localhost:80")
+        io_key = getattr(settings, "INTELOWL_API_KEY", None)
+        connector = IntelOwlConnector(api_url=io_url, api_key=io_key)
+        result = await connector.search(payload.target, search_type=payload.scan_type)
+        return {
+            "target": payload.target,
+            "success": result.success,
+            "emails": result.emails,
+            "domains": result.domains,
+            "data": result.additional_data,
+            "error": result.error,
+        }
+    except ImportError:
+        raise HTTPException(status_code=503, detail="IntelOwl connector not available")
+    except Exception as exc:
+        logger.exception("IntelOwl analyze error")
+        raise HTTPException(status_code=502, detail=f"IntelOwl error: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Recon-ng
+# ---------------------------------------------------------------------------
+
+class ReconNGScanRequest(BaseModel):
+    target: str
+    workspace: str = "osint_default"
+
+
+@router.post("/reconng/scan", summary="Run a Recon-ng reconnaissance scan")
+async def reconng_scan(
+    payload: ReconNGScanRequest,
+    current_user: AuthenticatedUser = Depends(get_current_active_user),
+):
+    """Runs recon-ng against *target*. Requires recon-ng installed on PATH."""
+    try:
+        import sys
+        sys.path.insert(0, ".")
+        from integrations.reconng_connector import ReconNGConnector  # type: ignore
+        connector = ReconNGConnector(workspace=payload.workspace)
+        result = await connector.search(payload.target)
+        return {
+            "target": payload.target,
+            "success": result.success,
+            "emails": result.emails,
+            "domains": result.domains,
+            "data": result.additional_data,
+            "error": result.error,
+        }
+    except ImportError:
+        raise HTTPException(status_code=503, detail="Recon-ng connector not available")
+    except Exception as exc:
+        logger.exception("Recon-ng scan error")
+        raise HTTPException(status_code=502, detail=f"Recon-ng error: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # HIBP
 # ---------------------------------------------------------------------------
 
@@ -261,5 +336,13 @@ async def integration_status():
         "spiderfoot": {
             "configured": bool(getattr(settings, "SPIDERFOOT_URL", None)),
             "description": "SpiderFoot OSINT platform",
+        },
+        "intelowl": {
+            "configured": _configured("INTELOWL_API_KEY"),
+            "description": "IntelOwl threat intelligence platform",
+        },
+        "reconng": {
+            "configured": bool(getattr(settings, "RECONNG_PATH", None)) or True,
+            "description": "Recon-ng (requires recon-ng on PATH)",
         },
     }

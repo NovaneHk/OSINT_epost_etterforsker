@@ -63,6 +63,9 @@ class Settings:
     HIBP_API_KEY: Optional[str] = None
     SPIDERFOOT_URL: Optional[str] = None
     SPIDERFOOT_API_KEY: Optional[str] = None
+    INTELOWL_URL: Optional[str] = "http://localhost:80"
+    INTELOWL_API_KEY: Optional[str] = None
+    RECONNG_PATH: Optional[str] = None  # Optional explicit path; falls back to PATH lookup
 
     # Redis
     REDIS_URL: Optional[str] = None

@@ -19,6 +19,7 @@ from backend.core.config import get_settings
 from backend.core.database import create_tables, close_db_connections
 from backend.core.logging import setup_logging
 from backend.api.routes import api_router
+from backend.api.scheduler import start_scheduler_background, stop_scheduler_background
 from backend.core.error_handlers import setup_exception_handlers
 from backend.middleware.rate_limiter import RateLimiterMiddleware
 from backend.middleware.request_logger import RequestLoggerMiddleware
@@ -75,12 +76,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await create_tables()
         logger.info("✅ Database tables created")
 
+    # Start autopilot workflow scheduler in background
+    await start_scheduler_background()
+
     logger.info("✅ Backend startup complete")
 
     yield
 
     # Shutdown
     logger.info("🔄 Shutting down backend...")
+    await stop_scheduler_background()
     await close_db_connections()
     logger.info("✅ Backend shutdown complete")
 
