@@ -234,7 +234,8 @@ class TestMeasureEmailProcessingException:
 
     def test_exception_yields_error_key(self):
         mon = _make_monitor()
-        # Patch time.time to raise after the start_time assignment
+        # Patch only the time module reference inside core.performance so that
+        # Python's logging module (which uses the real time.time) is not affected.
         call_count = [0]
 
         def broken_time():
@@ -243,7 +244,10 @@ class TestMeasureEmailProcessingException:
                 raise RuntimeError("time broken")
             return 0.0
 
-        with patch("core.performance.time.time", broken_time):
+        import types
+        mock_time = types.ModuleType("mock_time")
+        mock_time.time = broken_time  # type: ignore[attr-defined]
+        with patch("core.performance.time", mock_time):
             result = mon.measure_email_processing_performance(["a@b.com"])
         assert "error" in result
 

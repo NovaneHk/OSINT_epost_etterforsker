@@ -5,6 +5,7 @@ preventing PermissionError during temp-dir teardown on Windows.
 """
 import gc
 import os
+import sys
 import stat
 import time
 import shutil
@@ -38,7 +39,11 @@ def _patched_rmtree(path, ignore_errors=False, onerror=None, onexc=None, **kwarg
     if onerror is None and onexc is None and not ignore_errors:
         _robust_rmtree(path)
     else:
-        _orig_rmtree(path, ignore_errors=ignore_errors, onerror=onerror, onexc=onexc, **kwargs)
+        # onexc was added in Python 3.12; do not pass it on older interpreters
+        if sys.version_info >= (3, 12):
+            _orig_rmtree(path, ignore_errors=ignore_errors, onerror=onerror, onexc=onexc, **kwargs)
+        else:
+            _orig_rmtree(path, ignore_errors=ignore_errors, onerror=onerror, **kwargs)
 
 
 shutil.rmtree = _patched_rmtree
