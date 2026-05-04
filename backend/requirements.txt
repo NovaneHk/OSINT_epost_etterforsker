@@ -34,6 +34,7 @@ redis>=5.0.1
 
 # Monitoring
 psutil>=5.9.8
+prometheus-client>=0.20.0
 
 # AI / ML (Phase 4)
 scikit-learn>=1.3.0

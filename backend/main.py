@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import Response
@@ -176,6 +177,12 @@ def create_application() -> FastAPI:
             "version": settings.VERSION,
             "environment": settings.ENVIRONMENT
         }
+
+    # Prometheus metrics endpoint — scraped by prometheus container
+    @app.get("/metrics", include_in_schema=False)
+    async def prometheus_metrics():
+        """Expose Prometheus metrics in text format."""
+        return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     # Root endpoint
     @app.get("/", tags=["Root"])

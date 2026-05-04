@@ -44,9 +44,14 @@ target_metadata = BaseModel.metadata
 
 
 def get_database_url():
-    """Get database URL from settings"""
+    """Get database URL from settings, ensuring correct driver for psycopg3."""
     settings = get_settings()
-    return settings.DATABASE_URL
+    url = settings.DATABASE_URL
+    # psycopg3 requires 'postgresql+psycopg://' prefix; rewrite if needed
+    if url.startswith("postgresql://") or url.startswith("postgres://"):
+        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+        url = url.replace("postgres://", "postgresql+psycopg://", 1)
+    return url
 
 
 def run_migrations_offline() -> None:

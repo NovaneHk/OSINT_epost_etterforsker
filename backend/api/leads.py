@@ -149,11 +149,12 @@ async def get_leads(
 
         # Cache lookup
         import hashlib, json as _json
-        cache_key = "leads:list:" + hashlib.md5(
+        cache_key = "leads:list:" + hashlib.md5(  # nosec B324 — cache key only, not security
             _json.dumps([skip, limit, status, search, verification_status,
                          confidence_score_min, confidence_score_max,
                          source_ids, tags, date_from, date_to, sort_by, sort_order],
-                        sort_keys=True, default=str).encode()
+                        sort_keys=True, default=str).encode(),
+            usedforsecurity=False,
         ).hexdigest()
         cached = cache_manager.get(cache_key)
         if cached is not None:

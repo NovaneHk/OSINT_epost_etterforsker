@@ -59,10 +59,16 @@ class DatabaseMigrationManager:
             with engine.connect() as conn:
                 conn.execute(text("COMMIT"))  # End any existing transaction
 
-                # Check if database exists
-                result = conn.execute(text(f"SELECT 1 FROM pg_database WHERE datname='{db_name}'"))
+                # Check if database exists — db_name comes from the DATABASE_URL config,
+                # not from user input; sanitise to identifier-safe characters as a defence.
+                _safe_db_name = "".join(c for c in db_name if c.isalnum() or c == "_")
+                if _safe_db_name != db_name:
+                    raise ValueError(f"Unsafe database name: {db_name!r}")
+                result = conn.execute(text(  # nosec B608
+                    f"SELECT 1 FROM pg_database WHERE datname='{_safe_db_name}'"
+                ))
                 if not result.fetchone():
-                    conn.execute(text(f"CREATE DATABASE {db_name}"))
+                    conn.execute(text(f"CREATE DATABASE {_safe_db_name}"))  # nosec B608
                     logger.info(f"Created database: {db_name}")
                 else:
                     logger.info(f"Database already exists: {db_name}")

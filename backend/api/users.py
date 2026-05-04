@@ -338,7 +338,17 @@ async def update_user(
     if not update_data:
         return _serialize_user(user)
 
-    assignments = ", ".join(f"{field} = ?" for field in update_data)
+    # Whitelist of columns that may be updated to prevent SQL injection
+    _ALLOWED_UPDATE_COLS = frozenset({
+        "full_name", "username", "company", "department",
+        "job_title", "phone", "bio", "avatar_url",
+    })
+    invalid = set(update_data.keys()) - _ALLOWED_UPDATE_COLS
+    if invalid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Unknown update fields: {', '.join(sorted(invalid))}")
+
+    assignments = ", ".join(f"{field} = ?" for field in update_data)  # nosec B608 — field names whitelisted above
     params = tuple(update_data.values()) + (user_id,)
     db.execute_write(
         f"UPDATE users SET {assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
