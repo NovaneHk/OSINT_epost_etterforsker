@@ -295,6 +295,7 @@ class UserUpdate(BaseModel):
 class UserResponse(UserBase):
     """Schema for user response"""
     id: str
+    email: str  # Override EmailStr: accept any stored address including internal domains
     status: UserStatus
     is_active: bool
     is_verified: bool

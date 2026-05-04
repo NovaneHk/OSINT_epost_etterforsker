@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
-from backend.core.dependencies import DatabaseSession
+from backend.core.dependencies import DatabaseSession, CurrentUser
 
 class BaseResponse(BaseModel):
     data: Any = None
@@ -24,7 +24,7 @@ def _scalar(db, sql, params=()):
 
 
 @router.get("/", response_model=BaseResponse)
-async def get_kpis(db: DatabaseSession):
+async def get_kpis(db: DatabaseSession, current_user: CurrentUser):
     """Get key performance indicators for the dashboard."""
     try:
         now = datetime.utcnow()
@@ -82,11 +82,11 @@ async def get_kpis(db: DatabaseSession):
 
         return BaseResponse(data=kpi_data, message="KPI data retrieved successfully")
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to retrieve KPI data: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve KPI data")
 
 
 @router.get("/trends", response_model=BaseResponse)
-async def get_kpi_trends(days: int = 30, db: DatabaseSession = None):
+async def get_kpi_trends(current_user: CurrentUser, days: int = 30, db: DatabaseSession = None):
     """Get KPI trends over time for charts and graphs."""
     try:
         start_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
@@ -109,4 +109,4 @@ async def get_kpi_trends(days: int = 30, db: DatabaseSession = None):
             message="KPI trends retrieved successfully"
         )
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to retrieve KPI trends: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve KPI trends")

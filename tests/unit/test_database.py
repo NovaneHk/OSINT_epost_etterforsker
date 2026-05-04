@@ -2,6 +2,7 @@
 Unit tests for database management
 """
 
+import gc
 import pytest
 import tempfile
 import shutil
@@ -116,18 +117,25 @@ class TestDatabaseManager:
         """Create temporary directory for test database"""
         temp_dir = tempfile.mkdtemp()
         yield temp_dir
-        shutil.rmtree(temp_dir)
+        gc.collect()
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
     @pytest.fixture
     def db_manager(self, temp_db_dir):
         """Create DatabaseManager with temporary database"""
         db_path = Path(temp_db_dir) / "test.db"
-        return DatabaseManager(str(db_path))
+        manager = DatabaseManager(str(db_path))
+        yield manager
+        manager.close()
 
     def test_init_creates_database_file(self, temp_db_dir):
         """Test that database file is created on initialization"""
         db_path = Path(temp_db_dir) / "test.db"
         db_manager = DatabaseManager(str(db_path))
+        try:
+            assert db_path.exists()
+        finally:
+            db_manager.close()
 
         assert db_path.exists()
 

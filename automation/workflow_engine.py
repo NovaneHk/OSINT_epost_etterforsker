@@ -70,6 +70,15 @@ class WorkflowExecution:
     metadata: Dict[str, Any] = None
 
 @dataclass
+class WorkflowResult:
+    """Summary result of a completed workflow execution."""
+    workflow_id: str
+    status: str
+    total_results: int = 0
+    error: Optional[str] = None
+    metadata: Dict[str, Any] = None
+
+@dataclass
 class ScheduledWorkflow:
     """Scheduled workflow definition"""
     workflow_id: str

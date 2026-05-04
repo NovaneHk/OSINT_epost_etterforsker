@@ -80,6 +80,8 @@ hubspot_import_*.csv
 mailerlite_import_*.csv
 
 # Additional secrets and production configs (do not commit)
+.env.local
+frontend/.env.local
 .env.production
 deploy/.env.production
 deploy/production.yml

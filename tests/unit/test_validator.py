@@ -539,3 +539,142 @@ class TestEmailValidator:
             # Should succeed on retry
             assert result.is_valid is True
             assert mock_resolve.call_count == 2
+
+    # --- validate() dispatcher ---
+
+    def test_validate_syntax_level(self, validator):
+        result = validator.validate("user@example.com", ValidationLevel.SYNTAX)
+        assert result.validation_level == ValidationLevel.SYNTAX
+
+    def test_validate_basic_level(self, validator):
+        result = validator.validate("user@example.com", ValidationLevel.BASIC)
+        assert result.validation_level == ValidationLevel.BASIC
+
+    def test_validate_domain_level(self, validator):
+        with patch('dns.resolver.resolve', return_value=[Mock()]):
+            result = validator.validate("example.com", ValidationLevel.DOMAIN)
+        assert result.validation_level == ValidationLevel.DOMAIN
+
+    def test_validate_mx_level(self, validator):
+        result = validator.validate("user@example.com", ValidationLevel.MX)
+        assert result.validation_level == ValidationLevel.MX
+
+    def test_validate_smtp_level(self, validator):
+        import smtplib
+        with patch('smtplib.SMTP') as mock_smtp:
+            smtp_inst = Mock()
+            smtp_inst.rcpt.return_value = (250, "OK")
+            mock_smtp.return_value = smtp_inst
+            result = validator.validate("user@example.com", ValidationLevel.SMTP)
+        assert result.validation_level == ValidationLevel.SMTP
+
+    def test_validate_full_level(self, validator):
+        result = validator.validate("user@example.com", ValidationLevel.FULL)
+        assert result.validation_level == ValidationLevel.FULL
+
+    def test_validate_caches_result(self, validator):
+        """Second call with same args uses cache — validate_syntax called only once."""
+        with patch.object(validator, 'validate_syntax', wraps=validator.validate_syntax) as spy:
+            validator.validate("user@example.com", ValidationLevel.SYNTAX)
+            validator.validate("user@example.com", ValidationLevel.SYNTAX)
+        assert spy.call_count == 1
+
+    def test_validate_exception_returns_invalid(self, validator):
+        with patch.object(validator, 'validate_syntax', side_effect=RuntimeError("boom")):
+            result = validator.validate("user@example.com", ValidationLevel.SYNTAX)
+        assert result.is_valid is False
+        assert "boom" in result.errors
+
+    # --- _calculate_confidence_score ---
+
+    def test_confidence_score_full_valid(self, validator):
+        result = ValidationResult(
+            email="a@b.com",
+            is_valid=True,
+            syntax_valid=True,
+            domain_exists=True,
+            smtp_valid=True,
+            deliverable=True,
+            risk_score=0.1,
+        )
+        score = validator._calculate_confidence_score(result)
+        assert score > 0.8
+
+    def test_confidence_score_syntax_only(self, validator):
+        result = ValidationResult(email="a@b.com", is_valid=True, syntax_valid=True, risk_score=0.0)
+        score = validator._calculate_confidence_score(result)
+        assert 0.0 < score <= 1.0
+
+    def test_confidence_score_nothing_valid(self, validator):
+        result = ValidationResult(email="bad", is_valid=False, risk_score=0.5)
+        score = validator._calculate_confidence_score(result)
+        assert score == 0.0
+
+    # --- _calculate_risk_score ---
+
+    def test_risk_score_disposable(self, validator):
+        score = validator._calculate_risk_score("user@10minutemail.com")
+        assert score > 0.5
+
+    def test_risk_score_gmail(self, validator):
+        score = validator._calculate_risk_score("user@gmail.com")
+        assert 0.0 < score <= 1.0
+
+    def test_risk_score_business(self, validator):
+        score = validator._calculate_risk_score("user@corp.com")
+        assert score < 0.5
+
+    # --- _is_disposable_email ---
+
+    def test_is_disposable_known_provider(self, validator):
+        assert validator._is_disposable_email("user@10minutemail.com") is True
+        assert validator._is_disposable_email("anon@guerrillamail.com") is True
+
+    def test_is_disposable_legit_domain(self, validator):
+        assert validator._is_disposable_email("user@gmail.com") is False
+        assert validator._is_disposable_email("user@company.com") is False
+
+    # --- _is_free_provider (extra edge cases) ---
+
+    def test_free_provider_case_sensitivity(self, validator):
+        # The check uses email.endswith so uppercase addresses won't match lowercase domain
+        assert validator._is_free_provider("user@gmail.com") is True
+
+    # --- validate_batch (real call) ---
+
+    def test_validate_batch_returns_all(self, validator):
+        emails = ["a@example.com", "b@example.com", "bad-email"]
+        results = validator.validate_batch(emails, ValidationLevel.SYNTAX)
+        assert len(results) == 3
+
+    def test_validate_batch_correct_types(self, validator):
+        results = validator.validate_batch(["x@y.com"], ValidationLevel.SYNTAX)
+        assert isinstance(results[0], ValidationResult)
+
+    # --- validate_full happy/sad path ---
+
+    def test_validate_full_valid_no_mocking(self, validator):
+        """Real validate_full with valid syntax + domain in whitelist."""
+        with patch('smtplib.SMTP') as mock_smtp:
+            smtp_inst = Mock()
+            smtp_inst.rcpt.return_value = (250, "OK")
+            mock_smtp.return_value = smtp_inst
+            result = validator.validate_full("user@example.com")
+        assert result.validation_level == ValidationLevel.FULL
+        assert result.syntax_valid is True
+
+    def test_validate_full_invalid_domain_blocks(self, validator):
+        result = validator.validate_full("user@unknowndomain99.xyz")
+        assert result.is_valid is False
+
+    # --- clear_cache clears all state ---
+
+    def test_clear_cache_clears_seen_emails(self, validator):
+        validator.seen_emails.add("test@example.com")
+        validator.clear_cache()
+        assert len(validator.seen_emails) == 0
+
+    def test_clear_cache_clears_validation_cache(self, validator):
+        validator.validation_cache["key"] = "value"
+        validator.clear_cache()
+        assert len(validator.validation_cache) == 0

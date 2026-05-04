@@ -110,7 +110,7 @@ function NetworkGraph({ apiBase }: { apiBase: string }) {
           }
         }
 
-        const allNodes = [...domainMap.values(), ...emailMap.values()]
+        const allNodes = Array.from(domainMap.values()).concat(Array.from(emailMap.values()))
         setNodes(allNodes)
         setLinks(newLinks)
         setLoading(false)

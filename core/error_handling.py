@@ -446,3 +446,41 @@ def log_error(error: Exception, context: Optional[ErrorContext] = None) -> Error
 def create_context(operation: str, component: str, **kwargs) -> ErrorContext:
     """Convenience function to create error context"""
     return ErrorContext(operation, component, additional_data=kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Aliases required by automation/workflow_engine.py and other consumers
+# ---------------------------------------------------------------------------
+
+# OSINTError is the canonical application exception — alias to CustomError
+OSINTError = CustomError
+
+
+def handle_errors(func: Callable) -> Callable:
+    """Decorator that catches all exceptions and re-raises as OSINTError."""
+    import functools
+
+    @functools.wraps(func)
+    def sync_wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except OSINTError:
+            raise
+        except Exception as exc:
+            _global_error_handler.handle_error(exc)
+            raise OSINTError(str(exc)) from exc
+
+    @functools.wraps(func)
+    async def async_wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except OSINTError:
+            raise
+        except Exception as exc:
+            _global_error_handler.handle_error(exc)
+            raise OSINTError(str(exc)) from exc
+
+    import asyncio as _asyncio
+    if _asyncio.iscoroutinefunction(func):
+        return async_wrapper
+    return sync_wrapper

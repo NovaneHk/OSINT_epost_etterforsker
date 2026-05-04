@@ -424,3 +424,272 @@ class TestWebCrawler:
         # Session should be None after closing
         # Note: Actual implementation may vary
         # This test mainly ensures close() doesn't raise an exception
+
+
+# ---------------------------------------------------------------------------
+# OSINTCrawler tests (covers the second major class in crawler.py)
+# ---------------------------------------------------------------------------
+
+from scraping.crawler import OSINTCrawler
+
+
+class TestOSINTCrawler:
+    """Tests for OSINTCrawler – the orchestration class."""
+
+    @pytest.fixture
+    def mock_config_manager(self):
+        cm = Mock()
+        cm.load_sources.return_value = {
+            "search_dorks": {
+                "technology": [
+                    'site:linkedin.com "{persona}" {geo}',
+                ],
+            },
+            "source_categories": {
+                "directories": {
+                    "sources": [
+                        {"name": "TechDir", "url": "https://techdir.com", "enabled": True},
+                        {"name": "OffDir", "url": "https://offdir.com", "enabled": False},
+                    ]
+                },
+                "events": {
+                    "sources": [
+                        {"name": "TechConf", "url": "https://techconf.com", "enabled": True},
+                    ]
+                },
+                "sites": {
+                    "sources": [
+                        {"name": "Corp", "url": "https://corp.com", "enabled": True},
+                    ]
+                },
+            },
+        }
+        return cm
+
+    @pytest.fixture
+    def mock_db_manager(self):
+        db = Mock()
+        db.get_companies.return_value = [
+            {"name": "ACME", "domain": "acme.com"},
+        ]
+        db.store_company.return_value = None
+        return db
+
+    @pytest.fixture
+    def osint_crawler(self, mock_config_manager, mock_db_manager):
+        with patch("scraping.crawler.DatabaseManager", return_value=mock_db_manager):
+            c = OSINTCrawler(config_manager=mock_config_manager)
+        return c
+
+    # --- generate_search_queries ---
+
+    def test_generate_returns_list(self, osint_crawler):
+        queries = osint_crawler.generate_search_queries("CTO", "technology", "Norway")
+        assert isinstance(queries, list)
+        assert len(queries) > 0
+
+    def test_generate_replaces_geo(self, osint_crawler):
+        queries = osint_crawler.generate_search_queries("VP", "technology", "Bergen")
+        assert all("{geo}" not in q for q in queries)
+        assert any("Bergen" in q for q in queries)
+
+    def test_generate_replaces_persona(self, osint_crawler):
+        queries = osint_crawler.generate_search_queries("Director", "technology", "Oslo")
+        assert all("{persona}" not in q for q in queries)
+        assert any("Director" in q for q in queries)
+
+    def test_generate_includes_generic_queries(self, osint_crawler):
+        # "unknown" sector has no dorks → only 5 generic queries
+        queries = osint_crawler.generate_search_queries("Manager", "unknown", "Sweden")
+        assert len(queries) == 5
+
+    def test_generate_sector_dorks_technology(self, osint_crawler):
+        queries = osint_crawler.generate_search_queries("CTO", "technology", "Oslo")
+        # technology has 1 dork + 5 generic = 6
+        assert len(queries) >= 6
+
+    # --- dry_run_crawl ---
+
+    def test_dry_run_returns_dict(self, osint_crawler):
+        result = osint_crawler.dry_run_crawl(["directories"], limit=10)
+        assert "estimated_pages" in result
+        assert "source_breakdown" in result
+        assert "estimated_duration_minutes" in result
+
+    def test_dry_run_counts_only_enabled(self, osint_crawler):
+        result = osint_crawler.dry_run_crawl(["directories"], limit=100)
+        breakdown = result["source_breakdown"]["directories"]
+        # Only 1 enabled source (TechDir); OffDir is disabled
+        assert breakdown["sources_count"] == 1
+
+    def test_dry_run_unknown_type_excluded(self, osint_crawler):
+        result = osint_crawler.dry_run_crawl(["unknown_type"], limit=10)
+        assert result["estimated_pages"] == 0
+        assert "unknown_type" not in result["source_breakdown"]
+
+    def test_dry_run_multiple_types(self, osint_crawler):
+        result = osint_crawler.dry_run_crawl(["directories", "events"], limit=20)
+        assert "directories" in result["source_breakdown"]
+        assert "events" in result["source_breakdown"]
+
+    def test_dry_run_duration_positive_when_pages_found(self, osint_crawler):
+        result = osint_crawler.dry_run_crawl(["directories"], limit=10)
+        if result["estimated_pages"] > 0:
+            assert result["estimated_duration_minutes"] > 0
+
+    # --- crawl_sources (async) ---
+
+    @pytest.mark.asyncio
+    async def test_crawl_sources_unknown_type_skipped(self, osint_crawler):
+        result = await osint_crawler.crawl_sources(
+            source_types=["totally_unknown"],
+            concurrent_workers=1,
+            rate_limit=1.0,
+            limit=5,
+            respect_robots=True,
+        )
+        assert "totally_unknown" not in result
+
+    @pytest.mark.asyncio
+    async def test_crawl_sources_directories_error_captured(self, osint_crawler):
+        with patch.object(osint_crawler, "_crawl_directories", side_effect=Exception("fail")):
+            result = await osint_crawler.crawl_sources(
+                source_types=["directories"],
+                concurrent_workers=1,
+                rate_limit=1.0,
+                limit=5,
+                respect_robots=True,
+            )
+        assert "directories" in result
+        assert "error" in result["directories"]
+
+    @pytest.mark.asyncio
+    async def test_crawl_sources_events_error_captured(self, osint_crawler):
+        with patch.object(osint_crawler, "_crawl_events", side_effect=RuntimeError("event down")):
+            result = await osint_crawler.crawl_sources(
+                source_types=["events"],
+                concurrent_workers=1,
+                rate_limit=1.0,
+                limit=5,
+                respect_robots=True,
+            )
+        assert "events" in result
+        assert "error" in result["events"]
+
+    @pytest.mark.asyncio
+    async def test_crawl_sources_sites_error_captured(self, osint_crawler):
+        with patch.object(osint_crawler, "_crawl_company_sites", side_effect=ValueError("site err")):
+            result = await osint_crawler.crawl_sources(
+                source_types=["sites"],
+                concurrent_workers=1,
+                rate_limit=1.0,
+                limit=5,
+                respect_robots=True,
+            )
+        assert "sites" in result
+        assert "error" in result["sites"]
+
+    # --- _crawl_directories helper ---
+
+    @pytest.mark.asyncio
+    async def test_crawl_directories_success_path(self, osint_crawler, mock_db_manager):
+        """_crawl_directories returns a dict with required keys."""
+        category_config = {
+            "sources": [{"name": "TDir", "url": "https://tdir.com", "enabled": True, "credibility_score": 75}]
+        }
+
+        async def fake_crawl_dir_source(source, max_pages):
+            return [{"name": "Co A", "domain": "coa.com", "url": "https://coa.com", "industry": "Tech"}]
+
+        with patch.object(osint_crawler, "_crawl_directory_source", side_effect=fake_crawl_dir_source), \
+             patch("asyncio.sleep", return_value=None):
+            result = await osint_crawler._crawl_directories(category_config, 1, 1.0, 5, True)
+
+        assert "pages_crawled" in result
+        assert "companies_found" in result
+        assert "success_rate" in result
+        mock_db_manager.store_company.assert_called()
+
+    # --- _simulate_directory_data ---
+
+    def test_simulate_directory_data_returns_list(self, osint_crawler):
+        source = {"name": "SimDir", "url": "https://sim.com"}
+        data = osint_crawler._simulate_directory_data(source, max_pages=3)
+        assert isinstance(data, list)
+        assert len(data) == 3
+        assert all("name" in d and "domain" in d for d in data)
+
+    def test_simulate_directory_data_max_capped_at_10(self, osint_crawler):
+        source = {"name": "SimDir", "url": "https://sim.com"}
+        data = osint_crawler._simulate_directory_data(source, max_pages=50)
+        assert len(data) == 10  # Capped at 10
+
+    # --- _simulate_event_data ---
+
+    def test_simulate_event_data_returns_list(self, osint_crawler):
+        source = {"name": "SimEvent", "url": "https://simev.com"}
+        data = osint_crawler._simulate_event_data(source, max_pages=5)
+        assert isinstance(data, list)
+        assert len(data) == 5
+        assert all(d.get("event_context") is True for d in data)
+
+    # --- _extract_industry_from_context ---
+
+    def test_extract_industry_technology(self, osint_crawler):
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup('<div class="company">Software tech startup</div>', "html.parser")
+        industry = osint_crawler._extract_industry_from_context(soup.find("div"))
+        assert industry == "Technology"
+
+    def test_extract_industry_finance(self, osint_crawler):
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup('<div>Investment bank fintech</div>', "html.parser")
+        industry = osint_crawler._extract_industry_from_context(soup.find("div"))
+        assert industry == "Finance"
+
+    def test_extract_industry_unknown_returns_other(self, osint_crawler):
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup('<div>random content xyz</div>', "html.parser")
+        industry = osint_crawler._extract_industry_from_context(soup.find("div"))
+        assert industry == "Other"
+
+    # --- _extract_company_name_from_event ---
+
+    def test_extract_company_name_from_h3(self, osint_crawler):
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup('<div><h3>Acme Corp</h3></div>', "html.parser")
+        name = osint_crawler._extract_company_name_from_event(soup.find("div"))
+        assert name == "Acme Corp"
+
+    def test_extract_company_name_from_strong(self, osint_crawler):
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup('<div><strong>BoldCo</strong></div>', "html.parser")
+        name = osint_crawler._extract_company_name_from_event(soup.find("div"))
+        assert name == "BoldCo"
+
+    def test_extract_company_name_none_when_missing(self, osint_crawler):
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup('<div><span>no good tags</span></div>', "html.parser")
+        name = osint_crawler._extract_company_name_from_event(soup.find("div"))
+        assert name is None
+
+    # --- _extract_domain_from_event ---
+
+    def test_extract_domain_from_link(self, osint_crawler):
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup('<div><a href="https://eventco.com/about">Visit</a></div>', "html.parser")
+        domain = osint_crawler._extract_domain_from_event(soup.find("div"))
+        assert domain == "eventco.com"
+
+    def test_extract_domain_from_text(self, osint_crawler):
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup('<div>Visit us at example.com for details</div>', "html.parser")
+        domain = osint_crawler._extract_domain_from_event(soup.find("div"))
+        assert domain == "example.com"
+
+    def test_extract_domain_none_when_missing(self, osint_crawler):
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup('<div>No domain info here</div>', "html.parser")
+        # No href, no .com domain pattern → None
+        domain = osint_crawler._extract_domain_from_event(soup.find("div"))
+        assert domain is None

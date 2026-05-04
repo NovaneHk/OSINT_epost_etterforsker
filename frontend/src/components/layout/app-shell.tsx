@@ -12,7 +12,7 @@ interface AppShellProps {
 
 function isAuthRoute(pathname: string): boolean {
   const normalizedPath = pathname.replace(/^\/(nb|en)(?=\/|$)/, '') || '/';
-  return normalizedPath === '/login';
+  return normalizedPath === '/login' || normalizedPath === '/forgot-password' || normalizedPath === '/register';
 }
 
 export function AppShell({ children }: AppShellProps) {

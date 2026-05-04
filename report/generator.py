@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -681,7 +681,7 @@ class ReportGenerator:
         # Score distribution recommendations
         score_dist = email_stats.get('score_distribution', {})
         high_score_count = score_dist.get('high', 0)
-        total_emails = email_stats.get('total', 1)
+        total_emails = email_stats.get('total', 1) or 1
 
         if high_score_count / total_emails < 0.3:
             recommendations.append({

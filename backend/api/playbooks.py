@@ -8,6 +8,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Query
 
 from backend.core.database import db_manager, create_tables
+from backend.core.dependencies import CurrentUser
 
 router = APIRouter(prefix="/playbooks", tags=["Playbooks"])
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ def _serialize_playbook(row: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.get("/", response_model=Dict[str, Any])
 async def get_playbooks(
+    current_user: CurrentUser,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=1000),
 ):
@@ -64,7 +66,7 @@ async def get_playbooks(
 
 
 @router.post("/", response_model=Dict[str, Any])
-async def create_playbook(playbook_data: Dict[str, Any]):
+async def create_playbook(playbook_data: Dict[str, Any], current_user: CurrentUser):
     """Create a new playbook."""
     await create_tables()
 
@@ -99,7 +101,7 @@ async def create_playbook(playbook_data: Dict[str, Any]):
 
 
 @router.put("/{playbook_id}", response_model=Dict[str, Any])
-async def update_playbook(playbook_id: str, playbook_data: Dict[str, Any]):
+async def update_playbook(playbook_id: str, playbook_data: Dict[str, Any], current_user: CurrentUser):
     """Update an existing playbook."""
     await create_tables()
 
@@ -145,7 +147,7 @@ async def update_playbook(playbook_id: str, playbook_data: Dict[str, Any]):
 
 
 @router.delete("/{playbook_id}")
-async def delete_playbook(playbook_id: str):
+async def delete_playbook(playbook_id: str, current_user: CurrentUser):
     """Delete a playbook."""
     await create_tables()
     deleted = db_manager.execute_write("DELETE FROM playbooks WHERE id = ?", (playbook_id,))

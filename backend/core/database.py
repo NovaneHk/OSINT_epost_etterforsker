@@ -5,66 +5,140 @@ Basic database setup for OSINT system
 
 import sqlite3
 import asyncio
+import threading
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from uuid import uuid4
+
+try:
+    import psycopg
+    from psycopg.rows import dict_row as _pg_dict_row
+    _HAS_PSYCOPG = True
+except ImportError:
+    _HAS_PSYCOPG = False
 
 from .config import get_settings
 
 settings = get_settings()
 
-# Simple database connection
+# Database connection manager
 class DatabaseManager:
-    """Simple SQLite database manager"""
+    """Database manager supporting SQLite (development) and PostgreSQL (production)."""
 
     def __init__(self):
-        self.db_path = self._get_db_path()
-        self._ensure_db_directory()
+        db_url = settings.DATABASE_URL
+        self._is_postgres = db_url.startswith("postgresql://") or db_url.startswith("postgres://")
+        if self._is_postgres:
+            if not _HAS_PSYCOPG:
+                raise RuntimeError(
+                    "psycopg is required for PostgreSQL connections. "
+                    "Install it with: pip install psycopg"
+                )
+            self._pg_dsn = db_url
+            self.db_path = None
+        else:
+            self.db_path = self._get_db_path()
+            self._ensure_db_directory()
+        self._write_lock = threading.Lock()
 
     def _get_db_path(self) -> str:
-        """Get database path from settings"""
+        """Get SQLite database path from settings."""
         db_url = settings.DATABASE_URL
         if db_url.startswith("sqlite:///"):
-            # sqlite:///path → "path" (relative from cwd or absolute if starting with /)
-            # e.g. sqlite:////app/data/foo.db → /app/data/foo.db (absolute when 4 slashes used)
-            #      sqlite:///data/foo.db → "data/foo.db" (relative — resolved from cwd)
             return db_url[len("sqlite:///"):]
         if db_url.startswith("sqlite://"):
             return db_url[len("sqlite://"):]
         return "data/osint_cache.db"
 
     def _ensure_db_directory(self):
-        """Ensure database directory exists"""
+        """Ensure SQLite database directory exists."""
         db_file = Path(self.db_path)
         db_file.parent.mkdir(parents=True, exist_ok=True)
 
+    def _convert_query(self, query: str) -> str:
+        """Convert SQLite ? placeholders to PostgreSQL %s when needed."""
+        if self._is_postgres:
+            return query.replace("?", "%s")
+        return query
+
     def get_connection(self):
-        """Get database connection"""
-        return sqlite3.connect(self.db_path)
+        """Get a raw database connection (sqlite3 or psycopg)."""
+        if self._is_postgres:
+            conn = psycopg.connect(self._pg_dsn)
+            conn.autocommit = False
+            return conn
+        return sqlite3.connect(self.db_path, check_same_thread=False)
 
     def execute_query(self, query: str, params: tuple = ()) -> List[Dict]:
-        """Execute query and return results"""
-        with self.get_connection() as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            return [dict(row) for row in cursor.fetchall()]
+        """Execute SELECT query and return list of result dicts."""
+        query = self._convert_query(query)
+        if self._is_postgres:
+            conn = psycopg.connect(self._pg_dsn)
+            try:
+                with conn.cursor(row_factory=_pg_dict_row) as cur:
+                    cur.execute(query, params)
+                    return [dict(row) for row in cur.fetchall()]
+            finally:
+                conn.close()
+        else:
+            with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute(query, params)
+                return [dict(row) for row in cursor.fetchall()]
 
     def execute_insert(self, query: str, params: tuple = ()) -> int:
-        """Execute insert and return last row id"""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            conn.commit()
-            return cursor.lastrowid
+        """Execute INSERT and return the inserted row id."""
+        query = self._convert_query(query)
+        with self._write_lock:
+            if self._is_postgres:
+                conn = psycopg.connect(self._pg_dsn)
+                try:
+                    with conn.cursor() as cur:
+                        if query.strip().upper().startswith("INSERT") and "RETURNING" not in query.upper():
+                            pg_query = query.rstrip().rstrip(";") + " RETURNING id"
+                            try:
+                                cur.execute(pg_query, params)
+                                row = cur.fetchone()
+                                conn.commit()
+                                return row[0] if row else 0
+                            except Exception:
+                                conn.rollback()
+                                cur.execute(query, params)
+                                conn.commit()
+                                return 0
+                        else:
+                            cur.execute(query, params)
+                            conn.commit()
+                            return 0
+                finally:
+                    conn.close()
+            else:
+                with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(query, params)
+                    conn.commit()
+                    return cursor.lastrowid
 
     def execute_write(self, query: str, params: tuple = ()) -> int:
-        """Execute write query and return affected row count."""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            conn.commit()
-            return cursor.rowcount
+        """Execute UPDATE/DELETE and return affected row count."""
+        query = self._convert_query(query)
+        with self._write_lock:
+            if self._is_postgres:
+                conn = psycopg.connect(self._pg_dsn)
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(query, params)
+                        conn.commit()
+                        return cur.rowcount
+                finally:
+                    conn.close()
+            else:
+                with sqlite3.connect(self.db_path, check_same_thread=False) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(query, params)
+                    conn.commit()
+                    return cursor.rowcount
 
 
 # Global database manager
@@ -84,6 +158,9 @@ class metadata:
 
 async def create_tables():
     """Create all database tables if they don't exist"""
+    if db_manager._is_postgres:
+        print("PostgreSQL mode -- schema managed by Alembic. Run 'alembic upgrade head' to initialise.")
+        return
     comprehensive_schema = """
     CREATE TABLE IF NOT EXISTS leads (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -280,10 +357,11 @@ async def create_tables():
             _ensure_users_seeded(conn)
             conn.commit()
 
-            # Insert sample data if sources table is empty
-            cursor = conn.execute("SELECT COUNT(*) FROM sources")
-            if cursor.fetchone()[0] == 0:
-                await _insert_sample_sources(conn)
+            # Insert sample data only when enabled (never in production by default)
+            if settings.SEED_SAMPLE_DATA:
+                cursor = conn.execute("SELECT COUNT(*) FROM sources")
+                if cursor.fetchone()[0] == 0:
+                    await _insert_sample_sources(conn)
 
         print("Database tables created successfully")
     except Exception as e:
@@ -346,6 +424,8 @@ def _ensure_gdpr_columns(conn):
 
 def _ensure_indexes(conn):
     """Create performance indexes and enable WAL mode."""
+    # WAL pragma must run outside any active transaction
+    conn.commit()
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     index_statements = [
@@ -441,9 +521,8 @@ async def close_db_connections():
 async def check_database_health() -> bool:
     """Check if database is accessible"""
     try:
-        with db_manager.get_connection() as conn:
-            conn.execute("SELECT 1")
-            return True
+        rows = db_manager.execute_query("SELECT 1 AS ok")
+        return len(rows) > 0
     except Exception:
         return False
 
@@ -458,17 +537,33 @@ async def get_db_session():
 
 def revoke_jti_in_db(jti: str, expires_at: float) -> None:
     """Persist a revoked JTI to the jwt_blacklist table."""
+    import time
     try:
-        with db_manager.get_connection() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO jwt_blacklist (jti, expires_at) VALUES (?, ?)",
-                (jti, expires_at),
-            )
-            conn.commit()
-            # Prune expired entries (keep table small)
-            import time
-            conn.execute("DELETE FROM jwt_blacklist WHERE expires_at < ?", (time.time(),))
-            conn.commit()
+        if db_manager._is_postgres:
+            conn = db_manager.get_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO jwt_blacklist (jti, expires_at)
+                        VALUES (%s, %s)
+                        ON CONFLICT (jti) DO UPDATE SET expires_at = EXCLUDED.expires_at
+                        """,
+                        (jti, expires_at),
+                    )
+                    cur.execute("DELETE FROM jwt_blacklist WHERE expires_at < %s", (time.time(),))
+                    conn.commit()
+            finally:
+                conn.close()
+        else:
+            with db_manager.get_connection() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO jwt_blacklist (jti, expires_at) VALUES (?, ?)",
+                    (jti, expires_at),
+                )
+                conn.commit()
+                conn.execute("DELETE FROM jwt_blacklist WHERE expires_at < ?", (time.time(),))
+                conn.commit()
     except Exception:
         pass  # Fail silently — in-memory cache in JWTManager still covers this session
 
@@ -477,11 +572,10 @@ def is_jti_revoked_in_db(jti: str) -> bool:
     """Check if a JTI has been revoked (persisted blacklist, survives restarts)."""
     try:
         import time
-        with db_manager.get_connection() as conn:
-            row = conn.execute(
-                "SELECT jti FROM jwt_blacklist WHERE jti = ? AND expires_at > ?",
-                (jti, time.time()),
-            ).fetchone()
-            return row is not None
+        rows = db_manager.execute_query(
+            "SELECT jti FROM jwt_blacklist WHERE jti = ? AND expires_at > ?",
+            (jti, time.time()),
+        )
+        return len(rows) > 0
     except Exception:
         return False  # Fail open — in-memory blacklist is the first check

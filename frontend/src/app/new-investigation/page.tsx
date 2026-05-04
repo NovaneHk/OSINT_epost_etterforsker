@@ -27,7 +27,7 @@ interface Investigation {
     id: string;
     email: string;
     status: string;
-    score?: number;
+    score?: number | null;
     created_at?: string;
 }
 
@@ -45,7 +45,7 @@ export default function NewInvestigationPage() {
 
     useEffect(() => {
         api.getInvestigations({ limit: 5 })
-            .then((res) => setRecent(res.data?.investigations ?? res.data ?? []))
+            .then((res) => setRecent(res.data ?? []))
             .catch(() => {/* silent */});
     }, []);
 

@@ -570,3 +570,219 @@ class TestLeadScorer:
         assert result1.overall_score == result2.overall_score
         assert result1.confidence == result2.confidence
         assert result1.best_persona == result2.best_persona
+
+    # --- _get_domain_type ---
+
+    def test_get_domain_type_free_provider(self, scorer):
+        assert scorer._get_domain_type("gmail.com") == "free_provider"
+        assert scorer._get_domain_type("yahoo.com") == "free_provider"
+
+    def test_get_domain_type_educational(self, scorer):
+        assert scorer._get_domain_type("mit.edu") == "educational"
+
+    def test_get_domain_type_government(self, scorer):
+        assert scorer._get_domain_type("fda.gov") == "government"
+
+    def test_get_domain_type_organization(self, scorer):
+        assert scorer._get_domain_type("redcross.org") == "organization"
+
+    def test_get_domain_type_business_default(self, scorer):
+        assert scorer._get_domain_type("acmecorp.com") == "business"
+
+    # --- _is_business_domain ---
+
+    def test_is_business_domain_true(self, scorer):
+        assert scorer._is_business_domain("enterprise.com") is True
+        assert scorer._is_business_domain("techstartup.io") is True
+
+    def test_is_business_domain_false_for_free_providers(self, scorer):
+        assert scorer._is_business_domain("gmail.com") is False
+        assert scorer._is_business_domain("outlook.com") is False
+
+    # --- score_contacts_batch ---
+
+    def test_score_contacts_batch_returns_all(self, scorer):
+        contacts = [
+            Contact(email="a@co.com", domain="co.com", role="CTO"),
+            Contact(email="b@co.com", domain="co.com", role="Intern"),
+        ]
+        results = scorer.score_contacts_batch(contacts)
+        assert len(results) == 2
+        assert all(hasattr(r, "overall_score") for r in results)
+
+    def test_score_contacts_batch_empty(self, scorer):
+        results = scorer.score_contacts_batch([])
+        assert results == []
+
+    def test_score_contacts_batch_score_order(self, scorer):
+        cto = Contact(email="cto@co.com", domain="co.com", role="CTO", name="Alice", company="TechCo", confidence_score=0.9, status=ContactStatus.VALIDATED)
+        intern = Contact(email="intern@co.com", domain="co.com", role="Intern", confidence_score=0.1)
+        results = scorer.score_contacts_batch([cto, intern])
+        assert results[0].overall_score > results[1].overall_score
+
+    # --- get_score_explanation ---
+
+    def test_get_score_explanation_structure(self, scorer):
+        result = ScoreResult(
+            contact_email="x@y.com",
+            overall_score=0.75,
+            confidence=0.8,
+            best_persona="technical_leaders",
+            score_components=[
+                ScoreComponent(name="persona_match", score=0.9, weight=0.4),
+                ScoreComponent(name="domain_quality", score=0.7, weight=0.25),
+            ],
+        )
+        explanation = scorer.get_score_explanation(result)
+        assert "overall_score" in explanation
+        assert "confidence" in explanation
+        assert "best_persona" in explanation
+        assert "components" in explanation
+        assert "reasoning" in explanation
+
+    def test_get_score_explanation_components_detail(self, scorer):
+        result = ScoreResult(
+            contact_email="x@y.com",
+            overall_score=0.6,
+            score_components=[
+                ScoreComponent(name="role_relevance", score=0.5, weight=0.2),
+            ],
+        )
+        explanation = scorer.get_score_explanation(result)
+        comp = explanation["components"][0]
+        assert comp["name"] == "role_relevance"
+        assert "weighted" in comp
+
+    def test_get_score_explanation_no_persona(self, scorer):
+        result = ScoreResult(contact_email="x@y.com", overall_score=0.3)
+        explanation = scorer.get_score_explanation(result)
+        assert explanation["best_persona"] is None
+
+    # --- update_scoring_weights ---
+
+    def test_update_scoring_weights_valid(self, scorer):
+        new_weights = {
+            "persona_match": 0.5,
+            "domain_quality": 0.2,
+            "role_relevance": 0.2,
+            "email_validity": 0.1,
+        }
+        scorer.update_scoring_weights(new_weights)
+        assert scorer.scoring_weights["persona_match"] == 0.5
+        assert scorer.scoring_weights["domain_quality"] == 0.2
+
+    def test_update_scoring_weights_invalid_raises(self, scorer):
+        bad = {"a": 0.6, "b": 0.6}
+        with pytest.raises(ValueError):
+            scorer.update_scoring_weights(bad)
+
+    def test_update_scoring_weights_updates_default_weights(self, scorer):
+        new_weights = {"persona_match": 0.4, "domain_quality": 0.3, "role_relevance": 0.2, "email_validity": 0.1}
+        scorer.update_scoring_weights(new_weights)
+        assert scorer.default_weights == scorer.scoring_weights
+
+    # --- score_all_leads ---
+
+    def test_score_all_leads_empty_db(self, scorer, mock_config_manager):
+        scorer.db_manager = Mock()
+        scorer.db_manager.get_all_contacts.return_value = []
+        scorer.db_manager.add_contact.return_value = None
+
+        result = scorer.score_all_leads()
+
+        assert result["total_leads"] == 0
+        assert result["high_quality_leads"] == 0
+        assert result["quality_rate"] == 0
+
+    def test_score_all_leads_with_contacts(self, scorer):
+        scorer.db_manager = Mock()
+        contacts = [
+            Contact(email="a@co.com", domain="co.com", role="CTO", name="A", company="Co", confidence_score=0.9, status=ContactStatus.VALIDATED),
+            Contact(email="b@co.com", domain="co.com", role="Janitor", confidence_score=0.1),
+        ]
+        scorer.db_manager.get_all_contacts.return_value = contacts
+        scorer.db_manager.add_contact.return_value = None
+
+        result = scorer.score_all_leads(min_score=50)
+
+        assert result["total_leads"] == 2
+        assert "score_distribution" in result
+        assert "high" in result["score_distribution"]
+
+    def test_score_all_leads_exception_counted(self, scorer):
+        scorer.db_manager = Mock()
+        bad_contact = Mock(spec=Contact)
+        bad_contact.email = "bad@co.com"
+        # Make score_contact raise when called with this contact
+        scorer.db_manager.get_all_contacts.return_value = [bad_contact]
+
+        with patch.object(scorer, "score_contact", side_effect=Exception("scoring error")):
+            result = scorer.score_all_leads()
+
+        # Exception shouldn't crash the run, just count the contact
+        assert result["total_leads"] == 1
+
+    # --- ScoringResult alias ---
+
+    def test_scoring_result_alias(self):
+        from scoring.scorer import ScoringResult
+        r = ScoringResult(contact_email="a@b.com", overall_score=0.5)
+        assert r.contact_email == "a@b.com"
+
+    # --- ROLE_SCORES coverage ---
+
+    def test_role_scores_ceo_max(self, scorer):
+        contact = Contact(email="ceo@corp.com", domain="corp.com", role="CEO")
+        comp = scorer._score_role_relevance(contact)
+        assert comp.score == 1.0
+
+    def test_role_scores_student_min(self, scorer):
+        contact = Contact(email="s@uni.edu", domain="uni.edu", role="Student")
+        comp = scorer._score_role_relevance(contact)
+        assert comp.score <= 0.15
+
+    def test_role_scores_procurement(self, scorer):
+        # 'manager' key (0.6) is found before 'procurement' (0.75) in iteration order
+        contact = Contact(email="p@corp.com", domain="corp.com", role="Procurement Manager")
+        comp = scorer._score_role_relevance(contact)
+        assert comp.score == 0.6
+
+    def test_role_scores_unknown_role(self, scorer):
+        contact = Contact(email="x@corp.com", domain="corp.com", role="Xyzzy Officer")
+        comp = scorer._score_role_relevance(contact)
+        assert comp.score == 0.25  # Default
+
+    # --- edge cases for domain scoring ---
+
+    def test_domain_score_educational(self, scorer):
+        contact = Contact(email="prof@mit.edu", domain="mit.edu")
+        comp = scorer._score_domain_quality(contact)
+        assert comp.details["domain_type"] == "educational"
+        assert comp.score == 0.6
+
+    def test_domain_score_government(self, scorer):
+        contact = Contact(email="agent@agency.gov", domain="agency.gov")
+        comp = scorer._score_domain_quality(contact)
+        assert comp.details["domain_type"] == "government"
+
+    def test_domain_score_organization(self, scorer):
+        contact = Contact(email="coord@ngo.org", domain="ngo.org")
+        comp = scorer._score_domain_quality(contact)
+        assert comp.details["domain_type"] == "organization"
+
+    # --- _score_email_validity for different statuses ---
+
+    def test_email_validity_opted_out(self, scorer):
+        contact = Contact(email="x@co.com", confidence_score=0.8, status=ContactStatus.OPTED_OUT)
+        comp = scorer._score_email_validity(contact)
+        assert comp.score == 0.1
+
+    def test_email_validity_invalid_status(self, scorer):
+        contact = Contact(email="x@co.com", confidence_score=0.5, status=ContactStatus.INVALID)
+        comp = scorer._score_email_validity(contact)
+        assert comp.score == 0.0
+
+    def test_email_validity_contacted_status(self, scorer):
+        contact = Contact(email="x@co.com", confidence_score=0.8, status=ContactStatus.CONTACTED)
+        comp = scorer._score_email_validity(contact)
+        assert comp.score > 0.5

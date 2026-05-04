@@ -5,6 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter
 
 from backend.core.database import db_manager
+from backend.core.dependencies import CurrentUser
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
@@ -34,7 +35,7 @@ def _relative_time(ts: str | None) -> str:
 
 
 @router.get("/", response_model=List[Dict[str, Any]])
-async def get_notifications(limit: int = 10):
+async def get_notifications(current_user: CurrentUser, limit: int = 10):
     """Return the most recent system events as notifications."""
     db = db_manager
     events: List[Dict[str, Any]] = []

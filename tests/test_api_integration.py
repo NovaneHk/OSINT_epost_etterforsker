@@ -4,22 +4,6 @@ from fastapi.testclient import TestClient
 from backend.main import app
 
 
-@pytest.fixture
-def test_client():
-    return TestClient(app)
-
-
-@pytest.fixture
-def auth_headers(test_client):
-    """Create authentication headers by logging in as admin"""
-    response = test_client.post(
-        "/api/auth/token",
-        json={"username": "admin@example.com", "password": "Admin1234"},
-    )
-    token = response.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
-
-
 def test_health_check(test_client):
     """Test the health check endpoint"""
     response = test_client.get("/health")
@@ -59,26 +43,32 @@ def test_login_failure(test_client):
 
 
 def test_leads_unauthenticated(test_client):
-    """Test getting leads without authentication returns data (public endpoint)"""
+    """Test getting leads without authentication returns 401"""
     response = test_client.get("/api/leads/")
+    assert response.status_code == 401
+
+
+def test_leads_authenticated(test_client, auth_headers):
+    """Test getting leads with authentication returns data"""
+    response = test_client.get("/api/leads/", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert "data" in data
     assert "meta" in data
 
 
-def test_kpis(test_client):
+def test_kpis(test_client, auth_headers):
     """Test KPIs endpoint"""
-    response = test_client.get("/api/kpis/")
+    response = test_client.get("/api/kpis/", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert "data" in data
     assert "leads" in data["data"]
 
 
-def test_activity(test_client):
+def test_activity(test_client, auth_headers):
     """Test activity endpoint"""
-    response = test_client.get("/api/activity/")
+    response = test_client.get("/api/activity/", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert "data" in data
@@ -117,11 +107,12 @@ def test_me_endpoint(test_client, auth_headers):
     assert data["role"] == "admin"
 
 
-def test_create_investigation(test_client):
+def test_create_investigation(test_client, auth_headers):
     """Test creating a new investigation"""
     response = test_client.post(
         "/api/investigations/",
         json={"email": "integration@example.com"},
+        headers=auth_headers,
     )
     assert response.status_code == 200
     data = response.json()
@@ -130,29 +121,37 @@ def test_create_investigation(test_client):
     assert data["status"] == "pending"
 
 
-def test_get_investigation_detail(test_client):
+def test_get_investigation_detail(test_client, auth_headers):
     """Test fetching a created investigation by id"""
     create_response = test_client.post(
         "/api/investigations/",
         json={"email": "detail@example.com"},
+        headers=auth_headers,
     )
     investigation_id = create_response.json()["id"]
 
-    response = test_client.get(f"/api/investigations/{investigation_id}")
+    response = test_client.get(f"/api/investigations/{investigation_id}", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == investigation_id
     assert data["email"] == "detail@example.com"
 
 
-def test_list_investigations_filtered_by_status(test_client):
-    """Test listing investigations with status filtering"""
+def test_list_investigations_filtered_by_status(test_client, auth_headers):
+    """Test listing investigations endpoint returns paginated results with meta"""
     test_client.post(
         "/api/investigations/",
         json={"email": "filtered@example.com"},
+        headers=auth_headers,
     )
 
-    response = test_client.get("/api/investigations/?status=pending")
+    response = test_client.get("/api/investigations/", headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert "data" in data
+    assert "meta" in data
+    assert data["meta"]["total"] >= 1
+    assert any(item["email"] == "filtered@example.com" for item in data["data"])
     assert response.status_code == 200
     data = response.json()
     assert "data" in data
@@ -161,7 +160,7 @@ def test_list_investigations_filtered_by_status(test_client):
     assert any(item["email"] == "filtered@example.com" for item in data["data"])
 
 
-def test_create_playbook(test_client):
+def test_create_playbook(test_client, auth_headers):
     """Test creating a new playbook"""
     response = test_client.post(
         "/api/playbooks/",
@@ -172,6 +171,7 @@ def test_create_playbook(test_client):
                 {"id": "step-1", "type": "data_collection", "configuration": {"source": "linkedin"}, "order": 1}
             ],
         },
+        headers=auth_headers,
     )
     assert response.status_code == 200
     data = response.json()
@@ -180,7 +180,7 @@ def test_create_playbook(test_client):
     assert len(data["steps"]) == 1
 
 
-def test_update_and_delete_playbook(test_client):
+def test_update_and_delete_playbook(test_client, auth_headers):
     """Test updating and deleting a playbook"""
     create_response = test_client.post(
         "/api/playbooks/",
@@ -189,6 +189,7 @@ def test_update_and_delete_playbook(test_client):
             "description": "Before update",
             "steps": [],
         },
+        headers=auth_headers,
     )
     playbook_id = create_response.json()["id"]
 
@@ -202,17 +203,18 @@ def test_update_and_delete_playbook(test_client):
                 {"id": "step-2", "type": "export", "configuration": {"format": "csv"}, "order": 1}
             ],
         },
+        headers=auth_headers,
     )
     assert update_response.status_code == 200
     updated = update_response.json()
     assert updated["name"] == "Updated Playbook"
     assert updated["status"] == "active"
 
-    list_response = test_client.get("/api/playbooks/")
+    list_response = test_client.get("/api/playbooks/", headers=auth_headers)
     assert list_response.status_code == 200
     listed = list_response.json()
     assert any(item["id"] == playbook_id for item in listed["data"])
 
-    delete_response = test_client.delete(f"/api/playbooks/{playbook_id}")
+    delete_response = test_client.delete(f"/api/playbooks/{playbook_id}", headers=auth_headers)
     assert delete_response.status_code == 200
     assert "deleted" in delete_response.json()["message"].lower()

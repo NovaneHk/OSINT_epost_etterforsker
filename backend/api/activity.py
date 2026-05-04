@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, status, Query
 from pydantic import BaseModel
-from backend.core.dependencies import DatabaseSession
+from backend.core.dependencies import DatabaseSession, CurrentUser
 
 
 class BaseResponse(BaseModel):
@@ -26,6 +26,7 @@ def _scalar(db, sql, params=()):
 @router.get("/", response_model=BaseResponse)
 async def get_recent_activity(
     db: DatabaseSession,
+    current_user: CurrentUser,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     days: int = Query(7, ge=1, le=30),
@@ -117,11 +118,11 @@ async def get_recent_activity(
             message=f"Retrieved {len(paginated)} recent activities",
         )
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to retrieve activity data: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve activity data")
 
 
 @router.get("/summary", response_model=BaseResponse)
-async def get_activity_summary(db: DatabaseSession, days: int = Query(7, ge=1, le=30)):
+async def get_activity_summary(db: DatabaseSession, current_user: CurrentUser, days: int = Query(7, ge=1, le=30)):
     """Get activity summary statistics."""
     try:
         cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
@@ -148,11 +149,11 @@ async def get_activity_summary(db: DatabaseSession, days: int = Query(7, ge=1, l
             message="Activity summary retrieved successfully",
         )
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to retrieve activity summary: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve activity summary")
 
 
 @router.get("/types", response_model=BaseResponse)
-async def get_activity_types():
+async def get_activity_types(current_user: CurrentUser):
     """Get list of available activity types."""
     return BaseResponse(
         data={

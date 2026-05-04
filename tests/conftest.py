@@ -7,6 +7,16 @@ for the comprehensive test suite.
 
 import os
 import sys
+
+# Set test credentials/configuration BEFORE any backend imports so lru_cached settings pick them up
+import tempfile as _tempfile
+_TEST_DB_PATH = _tempfile.mktemp(suffix=".test.db")
+os.environ["ENVIRONMENT"] = "development"
+os.environ["DEFAULT_ADMIN_PASSWORD"] = "Admin1234"
+os.environ["SEED_DEFAULT_ADMIN"] = "true"
+os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
+os.environ.setdefault("RATE_LIMIT_REQUESTS_PER_MINUTE", "600")
+os.environ["TESTING"] = "true"
 import tempfile
 import sqlite3
 from pathlib import Path
@@ -23,6 +33,23 @@ sys.path.insert(0, str(project_root))
 
 from core.config import ConfigManager
 from core.database import DatabaseManager
+
+# Force-patch backend settings in case lru_cache already fired before our env vars.
+# This is safe to do here because lifespan/create_tables hasn't run yet.
+try:
+    from backend.core.config import get_settings as _get_backend_settings
+    _bs = _get_backend_settings()
+    _bs.DEFAULT_ADMIN_PASSWORD = "Admin1234"
+    _bs.SEED_DEFAULT_ADMIN = True
+    _bs.DATABASE_URL = f"sqlite:///{_TEST_DB_PATH}"
+    # Propagate to db_manager path if already created
+    import backend.core.database as _bdb
+    _bdb.settings.DEFAULT_ADMIN_PASSWORD = "Admin1234"
+    _bdb.settings.SEED_DEFAULT_ADMIN = True
+    _bdb.settings.DATABASE_URL = f"sqlite:///{_TEST_DB_PATH}"
+    _bdb.db_manager.db_path = _TEST_DB_PATH
+except ImportError:
+    pass
 
 
 # Test configuration
@@ -419,3 +446,39 @@ def pytest_runtest_setup(item):
     # Skip external tests if environment variable is set
     if item.get_closest_marker("external") and os.getenv("SKIP_EXTERNAL_TESTS"):
         pytest.skip("Skipping external test due to SKIP_EXTERNAL_TESTS environment variable")
+
+
+# ---------------------------------------------------------------------------
+# Backend API fixtures (shared by backend integration tests)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="session")
+def backend_client():
+    """Session-scoped FastAPI TestClient with running lifespan."""
+    from fastapi.testclient import TestClient
+    from backend.main import app
+    with TestClient(app) as client:
+        yield client
+
+
+@pytest.fixture(scope="session")
+def backend_auth(backend_client):
+    """Session-scoped auth headers for admin@example.com / Admin1234."""
+    response = backend_client.post(
+        "/api/auth/token",
+        json={"username": "admin@example.com", "password": "Admin1234"},
+    )
+    assert response.status_code == 200, f"Login failed: {response.text}"
+    token = response.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+# Aliases used by test_api_integration.py
+@pytest.fixture(scope="session")
+def test_client(backend_client):
+    return backend_client
+
+
+@pytest.fixture(scope="session")
+def auth_headers(backend_auth):
+    return backend_auth

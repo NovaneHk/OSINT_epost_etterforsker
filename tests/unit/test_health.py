@@ -571,3 +571,115 @@ class TestHealthMonitor:
         health_monitor.remove_custom_check("custom_service")
 
         assert "custom_service" not in health_monitor.custom_checks
+
+    # --- get_contact_metrics ---
+
+    def test_get_contact_metrics_success(self, health_monitor, mock_db_manager):
+        mock_db_manager.get_contact_stats.return_value = {"total": 5, "by_status": {"validated": 3}}
+        contact = Mock()
+        contact.lead_score = 0.8
+        mock_db_manager.get_all_contacts.return_value = [contact, contact]
+
+        result = health_monitor.get_contact_metrics()
+
+        assert result["total_contacts"] == 5
+        assert result["average_score"] == pytest.approx(0.8, 0.001)
+        assert "contacts_by_status" in result
+
+    def test_get_contact_metrics_empty(self, health_monitor, mock_db_manager):
+        mock_db_manager.get_contact_stats.return_value = {"total": 0, "by_status": {}}
+        mock_db_manager.get_all_contacts.return_value = []
+
+        result = health_monitor.get_contact_metrics()
+
+        assert result["total_contacts"] == 0
+        assert result["average_score"] == 0.0
+
+    def test_get_contact_metrics_exception(self, health_monitor, mock_db_manager):
+        mock_db_manager.get_contact_stats.side_effect = Exception("db error")
+
+        result = health_monitor.get_contact_metrics()
+
+        assert result["total_contacts"] == 0
+        assert result["average_score"] == 0.0
+
+    # --- check_configuration_health ---
+
+    def test_check_configuration_health_success(self, health_monitor, mock_config_manager):
+        mock_config_manager.load_personas.return_value = {"personas": [{"name": "cto"}]}
+        mock_config_manager.load_sources.return_value = {"sources": []}
+        mock_config_manager.load_rules.return_value = {"rules": []}
+
+        comp = health_monitor.check_configuration_health()
+
+        assert comp.component_name == "configuration"
+        assert comp.status == HealthStatus.HEALTHY
+
+    def test_check_configuration_health_missing_personas(self, health_monitor, mock_config_manager):
+        mock_config_manager.load_personas.return_value = {}
+        mock_config_manager.load_sources.return_value = {}
+        mock_config_manager.load_rules.return_value = {}
+
+        comp = health_monitor.check_configuration_health()
+
+        assert comp.status == HealthStatus.WARNING
+        assert comp.error_message is not None
+
+    def test_check_configuration_health_exception(self, health_monitor, mock_config_manager):
+        mock_config_manager.load_personas.side_effect = Exception("file not found")
+
+        comp = health_monitor.check_configuration_health()
+
+        assert comp.status == HealthStatus.CRITICAL
+        assert "file not found" in comp.error_message
+
+    # --- check_disk_space critical ---
+
+    def test_check_disk_space_critical(self, health_monitor):
+        with patch('psutil.disk_usage') as mock_disk:
+            mock_disk.return_value = Mock(percent=97.0, free=1 * 1024 ** 3)
+            comp = health_monitor.check_disk_space()
+            assert comp.status == HealthStatus.CRITICAL
+
+    # --- check_memory_usage warning (between threshold and threshold+10) ---
+
+    def test_check_memory_usage_warning(self, health_monitor):
+        with patch('psutil.virtual_memory') as mock_mem:
+            mock_mem.return_value = Mock(percent=87.0, available=1 * 1024 ** 3)
+            comp = health_monitor.check_memory_usage()
+            assert comp.status == HealthStatus.WARNING
+
+    # --- HealthCheck.component_statuses property ---
+
+    def test_health_check_component_statuses(self):
+        check = HealthCheck(
+            overall_status=HealthStatus.HEALTHY,
+            component_health=[
+                ComponentHealth("database", HealthStatus.HEALTHY),
+                ComponentHealth("disk_space", HealthStatus.WARNING),
+            ],
+        )
+        statuses = check.component_statuses
+        assert statuses["database"] == "healthy"
+        assert statuses["disk_space"] == "warning"
+
+    # --- perform_health_check with failing custom check ---
+
+    def test_perform_health_check_custom_check_exception(self, health_monitor):
+        def bad_check():
+            raise RuntimeError("custom failure")
+
+        health_monitor.add_custom_check("bad_service", bad_check)
+
+        with patch.object(health_monitor, 'get_system_metrics', return_value=SystemMetrics()):
+            with patch.object(health_monitor, 'check_database_health', return_value=ComponentHealth("database", HealthStatus.HEALTHY)):
+                with patch('psutil.disk_usage') as mock_disk:
+                    mock_disk.return_value = Mock(percent=50.0, free=100 * 1024 ** 3)
+                    with patch('psutil.virtual_memory') as mock_mem:
+                        mock_mem.return_value = Mock(percent=50.0, available=8 * 1024 ** 3)
+                        with patch.object(health_monitor, 'check_configuration_health', return_value=ComponentHealth("configuration", HealthStatus.HEALTHY)):
+                            result = health_monitor.perform_health_check()
+
+        bad = next((c for c in result.component_health if c.component_name == "bad_service"), None)
+        assert bad is not None
+        assert bad.status == HealthStatus.CRITICAL

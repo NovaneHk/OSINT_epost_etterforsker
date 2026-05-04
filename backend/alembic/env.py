@@ -16,7 +16,7 @@ backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
 # Import all SQLAlchemy models
-from backend.models.base import Base
+from backend.models.base import BaseModel
 from backend.models.user import User
 from backend.models.lead import Lead
 from backend.models.campaign import Campaign
@@ -35,7 +35,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Add your model's MetaData object here for 'autogenerate' support
-target_metadata = Base.metadata
+target_metadata = BaseModel.metadata
 
 # Other values from the config, defined by the needs of env.py,
 # can be acquired:

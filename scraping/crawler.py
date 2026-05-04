@@ -665,13 +665,13 @@ class OSINTCrawler:
 
         text_content = element.get_text().lower()
 
-        # Industry keywords mapping
+        # Industry keywords mapping (finance before technology to avoid 'fintech' → 'tech' false-positive)
         industry_keywords = {
-            'technology': ['tech', 'software', 'saas', 'ai', 'digital', 'cloud'],
+            'finance': ['fintech', 'finance', 'bank', 'investment'],
+            'healthcare': ['health', 'medical', 'pharma', 'biotech'],
             'ecommerce': ['ecommerce', 'e-commerce', 'retail', 'shop', 'store'],
             'manufacturing': ['manufacturing', 'industrial', 'production', 'factory'],
-            'finance': ['finance', 'bank', 'investment', 'fintech'],
-            'healthcare': ['health', 'medical', 'pharma', 'biotech'],
+            'technology': ['tech', 'software', 'saas', 'ai', 'digital', 'cloud'],
             'consulting': ['consulting', 'advisory', 'services']
         }
 

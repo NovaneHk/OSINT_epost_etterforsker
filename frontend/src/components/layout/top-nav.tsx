@@ -39,6 +39,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/store/auth';
 
 interface Notification {
   id: string | number;
@@ -53,6 +54,7 @@ interface Notification {
 export function TopNav() {
   const { theme, setTheme } = useTheme();
   const router = useRouter();
+  const { user, logout } = useAuthStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -371,6 +373,7 @@ export function TopNav() {
           <DropdownMenuTrigger asChild>
             <motion.div variants={buttonVariants} whileHover="hover" whileTap="tap">
               <Button
+                data-testid="user-menu"
                 variant="ghost"
                 className="relative h-10 w-auto rounded-lg px-3 hover:bg-light-surface-hover dark:hover:bg-dark-surface-hover"
               >
@@ -438,9 +441,12 @@ export function TopNav() {
               <span>Aktivitetslogg</span>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-osint-error hover:bg-osint-error/10 hover:text-osint-error">
+            <DropdownMenuItem
+              className="text-osint-error hover:bg-osint-error/10 hover:text-osint-error"
+              onClick={() => { logout(); router.push('/login'); }}
+            >
               <LogOut className="mr-3 h-4 w-4" />
-              <span>Logg ut</span>
+              <span>Logout</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

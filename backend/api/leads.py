@@ -689,19 +689,4 @@ async def delete_lead(lead_id: str, current_user: PermissionDeps.DeleteLeads = N
         raise HTTPException(status_code=500, detail="Failed to delete lead")
 
 
-@router.delete("/{lead_id}", response_model=Dict[str, Any])
-async def delete_lead(lead_id: str):
-    '''Delete a lead by ID'''
-    try:
-        await create_tables()
-        existing = db_manager.execute_query("SELECT id FROM leads WHERE id = ?", (lead_id,))
-        if not existing:
-            raise HTTPException(status_code=404, detail=f"Lead {lead_id} not found")
-        db_manager.execute_insert("DELETE FROM leads WHERE id = ?", (lead_id,))
-        cache_manager.clear_prefix("leads:list:")
-        return {"success": True, "message": f"Lead {lead_id} deleted"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error deleting lead {lead_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to delete lead")
+

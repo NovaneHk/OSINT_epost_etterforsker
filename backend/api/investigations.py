@@ -11,6 +11,7 @@ import os
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 
 from backend.core.database import db_manager, create_tables
+from backend.core.dependencies import CurrentUser
 
 router = APIRouter(prefix="/investigations", tags=["Investigations"])
 logger = logging.getLogger(__name__)
@@ -226,6 +227,7 @@ def _serialize_investigation(row: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.get("/", response_model=Dict[str, Any])
 async def get_investigations(
+    current_user: CurrentUser,
     status: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
@@ -261,7 +263,7 @@ async def get_investigations(
 
 
 @router.post("/", response_model=Dict[str, Any])
-async def create_investigation(investigation_data: Dict[str, Any], background_tasks: BackgroundTasks):
+async def create_investigation(investigation_data: Dict[str, Any], background_tasks: BackgroundTasks, current_user: CurrentUser):
     """Create a new investigation and immediately queue analysis."""
     await create_tables()
 
@@ -297,7 +299,7 @@ async def create_investigation(investigation_data: Dict[str, Any], background_ta
 
 
 @router.get("/{investigation_id}", response_model=Dict[str, Any])
-async def get_investigation(investigation_id: str):
+async def get_investigation(investigation_id: str, current_user: CurrentUser):
     """Get details of a specific investigation."""
     await create_tables()
 

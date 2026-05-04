@@ -34,11 +34,11 @@ def _robust_rmtree(path):
 _orig_rmtree = shutil.rmtree
 
 
-def _patched_rmtree(path, ignore_errors=False, onerror=None):
-    if onerror is None and not ignore_errors:
+def _patched_rmtree(path, ignore_errors=False, onerror=None, onexc=None, **kwargs):
+    if onerror is None and onexc is None and not ignore_errors:
         _robust_rmtree(path)
     else:
-        _orig_rmtree(path, ignore_errors=ignore_errors, onerror=onerror)
+        _orig_rmtree(path, ignore_errors=ignore_errors, onerror=onerror, onexc=onexc, **kwargs)
 
 
 shutil.rmtree = _patched_rmtree

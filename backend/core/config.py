@@ -113,9 +113,10 @@ class Settings:
     ENABLE_REAL_TIME_UPDATES: bool = True
     ENABLE_METRICS: bool = True
     SEED_DEFAULT_ADMIN: bool = True
+    SEED_SAMPLE_DATA: bool = True  # Set False in production to skip sample sources
     DEFAULT_ADMIN_EMAIL: str = "admin@example.com"
     DEFAULT_ADMIN_USERNAME: str = "admin"
-    DEFAULT_ADMIN_PASSWORD: str = "Admin1234"
+    DEFAULT_ADMIN_PASSWORD: str = ""  # MUST be set via DEFAULT_ADMIN_PASSWORD env var
     DEFAULT_ADMIN_FULL_NAME: str = "System Administrator"
     ENABLE_ADMIN_DOCS: bool = False     # expose /api/docs in prod with token
     ADMIN_DOCS_TOKEN: Optional[str] = None  # required when ENABLE_ADMIN_DOCS=true
@@ -143,6 +144,7 @@ class Settings:
         self.DEFAULT_ADMIN_USERNAME = os.getenv("DEFAULT_ADMIN_USERNAME", self.DEFAULT_ADMIN_USERNAME)
         self.DEFAULT_ADMIN_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", self.DEFAULT_ADMIN_PASSWORD)
         self.DEFAULT_ADMIN_FULL_NAME = os.getenv("DEFAULT_ADMIN_FULL_NAME", self.DEFAULT_ADMIN_FULL_NAME)
+        self.SEED_SAMPLE_DATA = os.getenv("SEED_SAMPLE_DATA", "false" if self.ENVIRONMENT == "production" else "true").lower() == "true"
 
         # External API keys
         self.CLEARBIT_API_KEY = os.getenv("CLEARBIT_API_KEY", self.CLEARBIT_API_KEY)
@@ -219,6 +221,12 @@ class Settings:
                 raise ValueError("JWT_SECRET_KEY must be set in production")
             if self.ALLOWED_HOSTS == ["*"]:
                 raise ValueError("ALLOWED_HOSTS cannot be wildcard in production")
+            if self.SEED_DEFAULT_ADMIN and not self.DEFAULT_ADMIN_PASSWORD:
+                raise ValueError(
+                    "DEFAULT_ADMIN_PASSWORD must be set via environment variable when "
+                    "SEED_DEFAULT_ADMIN=true in production. "
+                    "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(20))\""
+                )
 
 
 @lru_cache()
