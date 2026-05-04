@@ -69,7 +69,7 @@ def _map_user_row(row: dict) -> AuthenticatedUser:
         is_verified=bool(row.get("is_verified", 0)),
         hashed_password=row.get("hashed_password"),
         status=row.get("status", "active"),
-        last_login_at=row.get("last_login_at"),
+        last_login_at=row.get("last_login") or row.get("last_login_at"),
         login_count=int(row.get("login_count", 0) or 0),
     )
 
@@ -116,8 +116,8 @@ async def get_current_user_from_token(
 
         rows = db.execute_query(
             """
-            SELECT id, email, username, full_name, role, status, is_active,
-                   is_verified, hashed_password, last_login_at, login_count
+            SELECT id, email, username, full_name, role, is_active,
+                   is_verified, hashed_password, last_login, login_count
             FROM users
             WHERE id = ?
             LIMIT 1

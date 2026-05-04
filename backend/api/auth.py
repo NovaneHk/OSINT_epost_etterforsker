@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, field_validator
 import pyotp
 
 from backend.core.database import DatabaseManager
@@ -50,8 +50,19 @@ class RegisterRequest(BaseModel):
     """Registration request schema"""
     email: EmailStr
     username: str
-    password: str
+    password: str = Field(..., min_length=8, max_length=128)
     full_name: str
+
+    @field_validator('password')
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        if not any(c.isupper() for c in v):
+            raise ValueError('Password must contain at least one uppercase letter')
+        if not any(c.islower() for c in v):
+            raise ValueError('Password must contain at least one lowercase letter')
+        if not any(c.isdigit() for c in v):
+            raise ValueError('Password must contain at least one digit')
+        return v
 
 
 class ChangePasswordRequest(BaseModel):
@@ -117,7 +128,7 @@ def _serialize_user(row: Dict[str, Any]) -> UserResponse:
         job_title=row.get("job_title"),
         phone=row.get("phone"),
         bio=row.get("bio"),
-        last_login_at=row.get("last_login_at"),
+        last_login_at=row.get("last_login") or row.get("last_login_at"),
         login_count=int(row.get("login_count", 0) or 0),
         created_at=row.get("created_at") or datetime.utcnow(),
         updated_at=row.get("updated_at") or datetime.utcnow(),
@@ -152,7 +163,7 @@ def _touch_last_login(db: DatabaseManager, user_id: str) -> None:
     db.execute_write(
         """
         UPDATE users
-        SET last_login_at = CURRENT_TIMESTAMP,
+        SET last_login = CURRENT_TIMESTAMP,
             login_count = COALESCE(login_count, 0) + 1,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
@@ -305,9 +316,9 @@ async def register(
     db.execute_write(
         """
         INSERT INTO users (
-            id, email, username, full_name, hashed_password, role, status,
-            is_active, is_verified, login_count
-        ) VALUES (?, ?, ?, ?, ?, 'viewer', 'active', 1, 0, 0)
+            id, email, username, full_name, hashed_password, role,
+            is_active, is_verified, login_count, failed_login_attempts
+        ) VALUES (?, ?, ?, ?, ?, 'viewer', TRUE, FALSE, 0, 0)
         """,
         (
             user_id,
@@ -357,6 +368,9 @@ async def refresh_token(
         role=(user.get("role") or "viewer").upper(),
         permissions=permissions
     )
+
+    # Rotate: invalidate the consumed refresh token so it cannot be reused
+    jwt_manager.revoke_token(token_info.jti, token_info.exp)
 
     return RefreshTokenResponse(
         access_token=access_token,

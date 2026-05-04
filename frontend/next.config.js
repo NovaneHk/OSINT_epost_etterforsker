@@ -110,11 +110,13 @@ const nextConfig = {
   },
 
   // Rewrites for API proxy
+  // BACKEND_URL is a server-side only env var (read at runtime by the Node.js server).
+  // NEXT_PUBLIC_API_URL is a client-side var (baked at build time) — do NOT use it here.
   async rewrites() {
     return [
       {
         source: '/api/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/:path*`,
+        destination: `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/:path*`,
       },
     ];
   },

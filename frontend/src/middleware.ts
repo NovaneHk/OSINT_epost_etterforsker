@@ -36,15 +36,22 @@ export async function middleware(request: NextRequest) {
     );
 
     const isProtectedRoot = normalizedPath === '/';
+    const isPublicRoute = normalizedPath === '/login' || normalizedPath === '/forgot-password' || normalizedPath === '/register';
 
-    if ((isProtectedRoute || isProtectedRoot) && !token) {
+    if (!isPublicRoute && (isProtectedRoute || isProtectedRoot) && !token) {
         // Redirect to login page if no token is found
         const loginUrl = new URL('/login', request.url);
         loginUrl.searchParams.set('redirect', currentPath);
         return NextResponse.redirect(loginUrl);
     }
 
-    // Apply internationalization middleware if we pass authentication
+    // For protected routes that passed authentication, skip intl rewrite
+    // (intl middleware rewrites /leads → /nb/leads which doesn't exist in the file system)
+    if (isProtectedRoute || isProtectedRoot) {
+        return NextResponse.next();
+    }
+
+    // Apply internationalization middleware for public routes only
     return intlMiddleware(request);
 }
 

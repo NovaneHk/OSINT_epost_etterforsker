@@ -10,6 +10,7 @@ import json
 from datetime import datetime, timezone
 
 from backend.core.database import db_manager, create_tables
+from backend.core.dependencies import PermissionDeps
 from backend.core.exceptions import (
     LeadNotFoundError, ValidationError, DatabaseError, to_http_exception
 )
@@ -20,6 +21,8 @@ from backend.core.validators import (
 from backend.core.config import get_settings as _get_settings
 from backend.core.predictor import lead_predictor
 from backend.core.cache_manager import cache_manager
+
+_BATCH_MAX_SIZE = 500  # Maximum leads in a single batch operation
 
 router = APIRouter(prefix="/leads", tags=["Leads"])
 logger = logging.getLogger(__name__)
@@ -32,7 +35,13 @@ def _parse_csv_filter(value: Optional[str]) -> List[str]:
 
 
 def _normalize_lead_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    from datetime import datetime, date
     normalized = dict(record)
+
+    # Serialize datetime/date objects to ISO strings for JSON compatibility
+    for key, value in normalized.items():
+        if isinstance(value, (datetime, date)):
+            normalized[key] = value.isoformat()
 
     for field in ["tags", "technologies", "custom_fields"]:
         value = normalized.get(field)
@@ -113,6 +122,7 @@ class Lead:
 
 @router.get("/", response_model=Dict[str, Any])
 async def get_leads(
+    current_user: PermissionDeps.ReadLeads,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=1000),
     status: Optional[str] = Query(None),
@@ -242,11 +252,14 @@ async def get_leads(
         raise to_http_exception(e)
     except Exception as e:
         logger.error(f"Error getting leads: {e}")
-        raise DatabaseError(f"Failed to retrieve leads: {str(e)}", "select")
+        raise DatabaseError("Failed to retrieve leads", "select")
 
 
 @router.post("/", response_model=Dict[str, Any])
-async def create_lead(lead_data: Dict[str, Any]):
+async def create_lead(
+    lead_data: Dict[str, Any],
+    current_user: PermissionDeps.CreateLeads,
+):
     """Create a new lead"""
 
     try:
@@ -322,12 +335,15 @@ async def create_lead(lead_data: Dict[str, Any]):
         raise to_http_exception(e)
     except Exception as e:
         logger.error(f"Error creating lead: {e}")
-        raise DatabaseError(f"Failed to create lead: {str(e)}", "insert")
+        raise DatabaseError("Failed to create lead", "insert")
 
 
 @router.post("/batch", response_model=Dict[str, Any])
 @router.put("/batch", response_model=Dict[str, Any])
-async def batch_update_leads(batch_data: Dict[str, Any]):
+async def batch_update_leads(
+    batch_data: Dict[str, Any],
+    current_user: PermissionDeps.UpdateLeads,
+):
     """Update multiple leads in a single request."""
 
     try:
@@ -336,6 +352,9 @@ async def batch_update_leads(batch_data: Dict[str, Any]):
 
         if not lead_ids or not isinstance(lead_ids, list):
             raise HTTPException(status_code=400, detail="lead_ids must be a non-empty list")
+
+        if len(lead_ids) > _BATCH_MAX_SIZE:
+            raise HTTPException(status_code=400, detail=f"Batch size exceeds maximum of {_BATCH_MAX_SIZE} records")
 
         if not updates or not isinstance(updates, dict):
             raise HTTPException(status_code=400, detail="updates must be a non-empty object")
@@ -371,11 +390,12 @@ async def batch_update_leads(batch_data: Dict[str, Any]):
         raise
     except Exception as e:
         logger.error(f"Error batch updating leads: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Batch update failed")
 
 
 @router.get("/views", response_model=List[Dict[str, Any]])
 async def get_saved_lead_views(
+    current_user: PermissionDeps.ReadLeads,
     user_id: Optional[str] = Query(None),
     role: Optional[str] = Query(None)
 ):
@@ -416,11 +436,14 @@ async def get_saved_lead_views(
         return views
     except Exception as e:
         logger.error(f"Error getting saved lead views: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve saved views")
 
 
 @router.post("/views", response_model=Dict[str, Any])
-async def create_saved_lead_view(view_data: Dict[str, Any]):
+async def create_saved_lead_view(
+    view_data: Dict[str, Any],
+    current_user: PermissionDeps.CreateLeads,
+):
     """Create a saved lead filter view."""
     try:
         await create_tables()
@@ -476,12 +499,13 @@ async def create_saved_lead_view(view_data: Dict[str, Any]):
         raise
     except Exception as e:
         logger.error(f"Error creating saved lead view: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to create saved view")
 
 
 @router.delete("/views/{view_id}", response_model=Dict[str, Any])
 async def delete_saved_lead_view(
     view_id: int,
+    current_user: PermissionDeps.UpdateLeads,
     user_id: Optional[str] = Query(None),
     role: Optional[str] = Query(None)
 ):
@@ -506,11 +530,13 @@ async def delete_saved_lead_view(
         raise
     except Exception as e:
         logger.error(f"Error deleting saved lead view {view_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to delete saved view")
 
 
 @router.get("/stats", response_model=Dict[str, Any])
-async def get_lead_stats():
+async def get_lead_stats(
+    current_user: PermissionDeps.ReadLeads,
+):
     """Get lead statistics"""
 
     try:
@@ -557,11 +583,14 @@ async def get_lead_stats():
 
     except Exception as e:
         logger.error(f"Error getting lead stats: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve lead statistics")
 
 
 @router.get("/{lead_id}", response_model=Dict[str, Any])
-async def get_lead(lead_id: int):
+async def get_lead(
+    lead_id: int,
+    current_user: PermissionDeps.ReadLeads,
+):
     """Get a specific lead by ID"""
 
     try:
@@ -591,7 +620,11 @@ async def get_lead(lead_id: int):
 
 
 @router.put("/{lead_id}", response_model=Dict[str, Any])
-async def update_lead(lead_id: int, lead_data: Dict[str, Any]):
+async def update_lead(
+    lead_id: int,
+    lead_data: Dict[str, Any],
+    current_user: PermissionDeps.UpdateLeads,
+):
     """Update a specific lead"""
 
     try:
@@ -635,4 +668,40 @@ async def update_lead(lead_id: int, lead_data: Dict[str, Any]):
         raise
     except Exception as e:
         logger.error(f"Error updating lead {lead_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update lead")
+
+@router.delete("/{lead_id}", response_model=Dict[str, Any])
+async def delete_lead(lead_id: str, current_user: PermissionDeps.DeleteLeads = None):
+    """Delete a lead by ID"""
+    try:
+        await create_tables()
+        existing = db_manager.execute_query("SELECT id FROM leads WHERE id = ?", (lead_id,))
+        if not existing:
+            raise HTTPException(status_code=404, detail=f"Lead {lead_id} not found")
+        db_manager.execute_insert("DELETE FROM leads WHERE id = ?", (lead_id,))
+        cache_manager.clear_prefix("leads:list:")
+        logger.info(f"Deleted lead {lead_id}")
+        return {"success": True, "message": f"Lead {lead_id} deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting lead {lead_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete lead")
+
+
+@router.delete("/{lead_id}", response_model=Dict[str, Any])
+async def delete_lead(lead_id: str):
+    '''Delete a lead by ID'''
+    try:
+        await create_tables()
+        existing = db_manager.execute_query("SELECT id FROM leads WHERE id = ?", (lead_id,))
+        if not existing:
+            raise HTTPException(status_code=404, detail=f"Lead {lead_id} not found")
+        db_manager.execute_insert("DELETE FROM leads WHERE id = ?", (lead_id,))
+        cache_manager.clear_prefix("leads:list:")
+        return {"success": True, "message": f"Lead {lead_id} deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting lead {lead_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete lead")
