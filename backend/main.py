@@ -13,12 +13,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.responses import Response
 
 from backend.core.config import get_settings
 from backend.core.database import create_tables, close_db_connections
 from backend.core.logging import setup_logging
 from backend.api.routes import api_router
+from backend.api.scheduler import start_scheduler_background, stop_scheduler_background
 from backend.core.error_handlers import setup_exception_handlers
 from backend.middleware.rate_limiter import RateLimiterMiddleware
 from backend.middleware.request_logger import RequestLoggerMiddleware
@@ -26,6 +30,42 @@ from backend.middleware.request_logger import RequestLoggerMiddleware
 settings = get_settings()
 setup_logging()
 logger = logging.getLogger(__name__)
+
+
+def validate_runtime_configuration() -> None:
+    """Validate critical runtime configuration before serving traffic."""
+    required_settings = ["DATABASE_URL", "SECRET_KEY", "JWT_SECRET_KEY"]
+    missing = [name for name in required_settings if not getattr(settings, name, None)]
+    if missing:
+        raise RuntimeError(f"Missing required runtime settings: {', '.join(missing)}")
+
+    placeholder_values = {
+        "",
+        "your-secret-key-change-in-production",
+        "change-this-in-production",
+        "CHANGE_THIS",
+    }
+    if settings.ENVIRONMENT == "production":
+        invalid = [
+            name for name in ["SECRET_KEY", "JWT_SECRET_KEY"]
+            if str(getattr(settings, name, "")) in placeholder_values
+        ]
+        if invalid:
+            raise RuntimeError(f"Production secrets still use placeholder values: {', '.join(invalid)}")
+
+        if settings.ALLOWED_HOSTS == ["*"]:
+            raise RuntimeError("ALLOWED_HOSTS cannot be wildcard in production")
+
+    if settings.CORS_ORIGINS == ["*"]:
+        logger.warning("CORS_ORIGINS uses wildcard origin; credentialed cross-origin requests will be disabled")
+
+
+def get_cors_configuration() -> tuple[list[str], bool]:
+    """Return a safe CORS configuration for FastAPI middleware."""
+    origins = settings.CORS_ORIGINS or ["*"]
+    if "*" in origins:
+        return ["*"], False
+    return origins, True
 
 
 @asynccontextmanager
@@ -36,11 +76,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info(f"Debug mode: {settings.DEBUG}")
 
+    validate_runtime_configuration()
+
     # Initialize database
     if settings.CREATE_TABLES_ON_STARTUP:
         logger.info("📊 Creating database tables...")
         await create_tables()
         logger.info("✅ Database tables created")
+
+    # Start autopilot workflow scheduler in background
+    await start_scheduler_background()
 
     logger.info("✅ Backend startup complete")
 
@@ -48,6 +93,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Shutdown
     logger.info("🔄 Shutting down backend...")
+    await stop_scheduler_background()
     await close_db_connections()
     logger.info("✅ Backend shutdown complete")
 
@@ -55,16 +101,41 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 def create_application() -> FastAPI:
     """Create and configure FastAPI application"""
 
+    cors_origins, allow_credentials = get_cors_configuration()
+
+    _docs_enabled = settings.DEBUG or settings.ENABLE_ADMIN_DOCS
+
     app = FastAPI(
         title=settings.PROJECT_NAME,
         description=settings.PROJECT_DESCRIPTION,
         version=settings.VERSION,
         debug=settings.DEBUG,
         lifespan=lifespan,
-        docs_url="/api/docs" if settings.DEBUG else None,
-        redoc_url="/api/redoc" if settings.DEBUG else None,
-        openapi_url="/api/openapi.json" if settings.DEBUG else None,
+        docs_url="/api/docs" if _docs_enabled else None,
+        redoc_url="/api/redoc" if _docs_enabled else None,
+        openapi_url="/api/openapi.json" if _docs_enabled else None,
     )
+
+    # In non-debug mode, guard /api/docs, /api/redoc, /api/openapi.json
+    # behind the ADMIN_DOCS_TOKEN header so they are not publicly accessible.
+    if settings.ENABLE_ADMIN_DOCS and not settings.DEBUG:
+        _docs_paths = {"/api/docs", "/api/redoc", "/api/openapi.json"}
+
+        class AdminDocsGuard(BaseHTTPMiddleware):
+            async def dispatch(self, request: Request, call_next) -> Response:
+                if request.url.path in _docs_paths:
+                    auth = request.headers.get("Authorization", "")
+                    token = auth.removeprefix("Bearer ").strip()
+                    expected = settings.ADMIN_DOCS_TOKEN or ""
+                    if not expected or token != expected:
+                        return JSONResponse(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            content={"detail": "Admin docs require a valid Authorization: Bearer <ADMIN_DOCS_TOKEN>"},
+                            headers={"WWW-Authenticate": "Bearer"},
+                        )
+                return await call_next(request)
+
+        app.add_middleware(AdminDocsGuard)
 
     # Security middleware
     app.add_middleware(
@@ -75,8 +146,8 @@ def create_application() -> FastAPI:
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS,
-        allow_credentials=True,
+        allow_origins=cors_origins,
+        allow_credentials=allow_credentials,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
         allow_headers=["*"],
         expose_headers=["X-Total-Count", "X-Page-Count"]
@@ -111,6 +182,12 @@ def create_application() -> FastAPI:
             "version": settings.VERSION,
             "environment": settings.ENVIRONMENT
         }
+
+    # Prometheus metrics endpoint — scraped by prometheus container
+    @app.get("/metrics", include_in_schema=False)
+    async def prometheus_metrics():
+        """Expose Prometheus metrics in text format."""
+        return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     # Root endpoint
     @app.get("/", tags=["Root"])

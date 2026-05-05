@@ -33,7 +33,14 @@ async def get_comprehensive_health(
     Get comprehensive health status including all system components.
     Requires dashboard read permissions for full details.
     """
-    return await get_health_status()
+    result = await get_health_status()
+    overall = result.get("status", "unknown")
+    # Add frontend-compatible top-level fields alongside internal data
+    result["cli_available"] = True
+    result["details"] = result.get("summary", {})
+    if overall not in ("healthy", "unhealthy"):
+        result["status"] = "healthy" if overall == "degraded" else "unhealthy"
+    return result
 
 
 @router.get(

@@ -13,6 +13,7 @@ import {
   BarChart3,
   Brain,
   Globe,
+  Network,
   Shield,
   TrendingUp,
   Zap,
@@ -21,6 +22,261 @@ import {
   Server,
   Cpu
 } from 'lucide-react'
+
+// ---------------------------------------------------------------------------
+// Network Graph – pure-SVG force-directed layout, no external dependencies
+// ---------------------------------------------------------------------------
+
+interface GraphNode {
+  id: string
+  label: string
+  type: 'email' | 'domain'
+  x: number
+  y: number
+  vx: number
+  vy: number
+}
+
+interface GraphLink {
+  source: string
+  target: string
+}
+
+function NetworkGraph({ apiBase }: { apiBase: string }) {
+  const [nodes, setNodes] = React.useState<GraphNode[]>([])
+  const [links, setLinks] = React.useState<GraphLink[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [graphError, setGraphError] = React.useState<string | null>(null)
+  const animRef = React.useRef<number | undefined>(undefined)
+  const WIDTH = 800
+  const HEIGHT = 480
+
+  // Fetch leads and build graph data
+  React.useEffect(() => {
+    const token =
+      typeof window !== 'undefined'
+        ? (document.cookie.match(/(?:^|;\s*)token=([^;]*)/))?.[1] ||
+          localStorage.getItem('accessToken')
+        : null
+    const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {}
+
+    fetch(`${apiBase}/api/leads/?limit=80`, { headers })
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
+      .then((data) => {
+        const items: any[] = data.leads || data.items || data.data || []
+
+        const domainMap = new Map<string, GraphNode>()
+        const emailMap = new Map<string, GraphNode>()
+        const newLinks: GraphLink[] = []
+
+        const rand = (min: number, max: number) => min + Math.random() * (max - min)
+
+        for (const lead of items) {
+          const email: string = lead.email || ''
+          const domain: string =
+            lead.domain || (email.includes('@') ? email.split('@')[1] : '')
+
+          if (!email && !domain) continue
+
+          if (domain && !domainMap.has(domain)) {
+            domainMap.set(domain, {
+              id: `d:${domain}`,
+              label: domain,
+              type: 'domain',
+              x: rand(100, WIDTH - 100),
+              y: rand(80, HEIGHT - 80),
+              vx: 0,
+              vy: 0,
+            })
+          }
+
+          if (email && !emailMap.has(email)) {
+            emailMap.set(email, {
+              id: `e:${email}`,
+              label: email,
+              type: 'email',
+              x: rand(80, WIDTH - 80),
+              y: rand(60, HEIGHT - 60),
+              vx: 0,
+              vy: 0,
+            })
+          }
+
+          if (email && domain) {
+            newLinks.push({ source: `e:${email}`, target: `d:${domain}` })
+          }
+        }
+
+        const allNodes = Array.from(domainMap.values()).concat(Array.from(emailMap.values()))
+        setNodes(allNodes)
+        setLinks(newLinks)
+        setLoading(false)
+      })
+      .catch((err) => {
+        setGraphError(`Could not load leads: ${err.message}`)
+        setLoading(false)
+      })
+  }, [apiBase])
+
+  // Force-directed simulation
+  React.useEffect(() => {
+    if (nodes.length === 0 || links.length === 0) return
+
+    let simNodes: GraphNode[] = nodes.map((n) => ({ ...n }))
+    let frame = 0
+
+    const tick = () => {
+      frame++
+
+      // Repulsion between every pair
+      for (let i = 0; i < simNodes.length; i++) {
+        for (let j = i + 1; j < simNodes.length; j++) {
+          const dx = simNodes[j].x - simNodes[i].x
+          const dy = simNodes[j].y - simNodes[i].y
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1
+          const f = 2000 / (dist * dist)
+          simNodes[i].vx -= (f * dx) / dist
+          simNodes[i].vy -= (f * dy) / dist
+          simNodes[j].vx += (f * dx) / dist
+          simNodes[j].vy += (f * dy) / dist
+        }
+      }
+
+      // Spring attraction along links
+      const nodeById = new Map(simNodes.map((n) => [n.id, n]))
+      for (const link of links) {
+        const s = nodeById.get(link.source)
+        const t = nodeById.get(link.target)
+        if (!s || !t) continue
+        const dx = t.x - s.x
+        const dy = t.y - s.y
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1
+        const ideal = 110
+        const f = (dist - ideal) * 0.06
+        s.vx += (f * dx) / dist
+        s.vy += (f * dy) / dist
+        t.vx -= (f * dx) / dist
+        t.vy -= (f * dy) / dist
+      }
+
+      // Centering pull
+      for (const n of simNodes) {
+        n.vx += (WIDTH / 2 - n.x) * 0.003
+        n.vy += (HEIGHT / 2 - n.y) * 0.003
+      }
+
+      // Dampen + integrate
+      for (const n of simNodes) {
+        n.vx *= 0.82
+        n.vy *= 0.82
+        n.x = Math.max(24, Math.min(WIDTH - 24, n.x + n.vx))
+        n.y = Math.max(24, Math.min(HEIGHT - 24, n.y + n.vy))
+      }
+
+      setNodes([...simNodes])
+
+      // Run for ~180 frames (~3 s at 60 fps) then stop
+      if (frame < 180) {
+        animRef.current = requestAnimationFrame(tick)
+      }
+    }
+
+    animRef.current = requestAnimationFrame(tick)
+    return () => {
+      if (animRef.current !== undefined) cancelAnimationFrame(animRef.current)
+    }
+  }, [links])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
+        <span className="ml-3 text-gray-600">Building network graph…</span>
+      </div>
+    )
+  }
+
+  if (graphError) {
+    return (
+      <Alert>
+        <AlertTriangle className="h-4 w-4" />
+        <AlertDescription>{graphError}</AlertDescription>
+      </Alert>
+    )
+  }
+
+  if (nodes.length === 0) {
+    return (
+      <p className="text-center text-gray-500 py-8">
+        No leads found — run an OSINT investigation first.
+      </p>
+    )
+  }
+
+  return (
+    <div>
+      <div className="flex items-center space-x-4 mb-3 text-sm text-gray-500">
+        <span className="flex items-center space-x-1">
+          <span className="inline-block w-3 h-3 rounded-full bg-orange-400" />
+          <span>Domain ({nodes.filter((n) => n.type === 'domain').length})</span>
+        </span>
+        <span className="flex items-center space-x-1">
+          <span className="inline-block w-3 h-3 rounded-full bg-blue-500" />
+          <span>E-post ({nodes.filter((n) => n.type === 'email').length})</span>
+        </span>
+        <span>{links.length} koblinger</span>
+      </div>
+      <svg
+        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+        className="w-full border rounded-lg bg-gray-50"
+        style={{ minHeight: 320 }}
+      >
+        {/* Links */}
+        {links.map((link, i) => {
+          const s = nodes.find((n) => n.id === link.source)
+          const t = nodes.find((n) => n.id === link.target)
+          if (!s || !t) return null
+          return (
+            <line
+              key={i}
+              x1={s.x}
+              y1={s.y}
+              x2={t.x}
+              y2={t.y}
+              stroke="#d1d5db"
+              strokeWidth={1}
+              strokeOpacity={0.7}
+            />
+          )
+        })}
+        {/* Nodes */}
+        {nodes.map((node) => (
+          <g key={node.id} transform={`translate(${node.x},${node.y})`}>
+            <title>{node.label}</title>
+            <circle
+              r={node.type === 'domain' ? 13 : 8}
+              fill={node.type === 'domain' ? '#f97316' : '#3b82f6'}
+              fillOpacity={0.85}
+              stroke="#fff"
+              strokeWidth={1.5}
+            />
+            <text
+              textAnchor="middle"
+              y={node.type === 'domain' ? 24 : 19}
+              fontSize={node.type === 'domain' ? 9.5 : 8}
+              fill="#374151"
+            >
+              {node.label.length > 22 ? node.label.slice(0, 20) + '…' : node.label}
+            </text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  )
+}
 
 // Real-time Analytics Dashboard for Phase 4
 export default function AnalyticsPage() {
@@ -37,7 +293,9 @@ export default function AnalyticsPage() {
     const connectWebSocket = () => {
       try {
         // In production, use proper WebSocket URL
-        ws = new WebSocket('ws://localhost:8000/api/analytics/ws')
+        const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+        const wsBase = apiBase.replace(/^http/, 'ws')
+        ws = new WebSocket(`${wsBase}/api/analytics/ws`)
 
         ws.onopen = () => {
           console.log('WebSocket connected')
@@ -86,49 +344,17 @@ export default function AnalyticsPage() {
     }
   }, [])
 
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
   const fetchDashboardData = async () => {
     try {
-      // Simulate API call - in production, use actual API
-      const mockData = {
-        overview: {
-          total_investigations: 1247,
-          active_threats: 23,
-          risk_score_average: 0.34,
-          processing_speed: 156
-        },
-        ai_analytics: {
-          ai_engine: {
-            summary: {
-              total_analyses: 5432,
-              average_confidence: 0.87,
-              average_processing_time: 67
-            },
-            health: {
-              status: 'healthy',
-              ml_available: false,
-              models_loaded: 0
-            }
-          },
-          nlp_processor: {
-            health: {
-              status: 'healthy',
-              nlp_available: false,
-              patterns_loaded: 7
-            }
-          }
-        },
-        system_health: {
-          status: 'healthy',
-          uptime: '99.8%',
-          components: {
-            database: 'healthy',
-            ai_engine: 'degraded',
-            api: 'healthy',
-            frontend: 'healthy'
-          }
-        }
-      }
-      setDashboardData(mockData)
+      const token = typeof window !== 'undefined'
+        ? (document.cookie.match(/(?:^|;\s*)token=([^;]*)/))?.[1] || localStorage.getItem('accessToken')
+        : null
+      const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {}
+      const res = await fetch(`${apiBase}/api/analytics/dashboard/overview`, { headers })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setDashboardData(await res.json())
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error)
     }
@@ -136,35 +362,13 @@ export default function AnalyticsPage() {
 
   const fetchThreatsData = async () => {
     try {
-      // Simulate threats data
-      const mockThreats = {
-        active_threats: [
-          {
-            id: 'threat_001',
-            type: 'phishing_email',
-            severity: 'high',
-            source: 'suspicious-domain.tk',
-            risk_score: 0.89
-          },
-          {
-            id: 'threat_002',
-            type: 'domain_reputation',
-            severity: 'medium',
-            source: 'example-bad.com',
-            risk_score: 0.67
-          }
-        ],
-        threat_trends: {
-          hourly_detections: [12, 8, 15, 23, 18, 9, 14, 19, 25, 16, 11, 20]
-        },
-        severity_breakdown: {
-          critical: 5,
-          high: 18,
-          medium: 34,
-          low: 67
-        }
-      }
-      setThreatsData(mockThreats)
+      const token = typeof window !== 'undefined'
+        ? (document.cookie.match(/(?:^|;\s*)token=([^;]*)/))?.[1] || localStorage.getItem('accessToken')
+        : null
+      const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {}
+      const res = await fetch(`${apiBase}/api/analytics/threats/realtime`, { headers })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setThreatsData(await res.json())
     } catch (error) {
       console.error('Failed to fetch threats data:', error)
     }
@@ -172,25 +376,13 @@ export default function AnalyticsPage() {
 
   const fetchPerformanceData = async () => {
     try {
-      // Simulate performance data
-      const mockPerformance = {
-        processing_performance: {
-          emails_per_minute: 156,
-          domains_per_minute: 89,
-          average_processing_time: '67ms',
-          success_rate: '99.2%'
-        },
-        system_resources: {
-          cpu_usage: '34%',
-          memory_usage: '68%',
-          disk_usage: '45%'
-        },
-        ai_model_performance: {
-          status: 'unavailable',
-          message: 'AI components not installed'
-        }
-      }
-      setPerformanceData(mockPerformance)
+      const token = typeof window !== 'undefined'
+        ? (document.cookie.match(/(?:^|;\s*)token=([^;]*)/))?.[1] || localStorage.getItem('accessToken')
+        : null
+      const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {}
+      const res = await fetch(`${apiBase}/api/analytics/performance/metrics`, { headers })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setPerformanceData(await res.json())
     } catch (error) {
       console.error('Failed to fetch performance data:', error)
     }
@@ -309,6 +501,10 @@ export default function AnalyticsPage() {
           <TabsTrigger value="threats">Threat Monitoring</TabsTrigger>
           <TabsTrigger value="ai-analytics">AI Analytics</TabsTrigger>
           <TabsTrigger value="performance">Performance</TabsTrigger>
+          <TabsTrigger value="network">
+            <Network className="h-4 w-4 mr-1" />
+            Nettverksgraf
+          </TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
@@ -631,6 +827,25 @@ export default function AnalyticsPage() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* Network Graph Tab */}
+        <TabsContent value="network" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <Network className="h-5 w-5" />
+                <span>Kontakt-Nettverksgraf</span>
+              </CardTitle>
+              <CardDescription>
+                Domenene vises som oransje noder, e-poster som blå. Kanter representerer eierskap.
+                Grafen stabiliseres automatisk etter noen sekunder.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <NetworkGraph apiBase={apiBase} />
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>

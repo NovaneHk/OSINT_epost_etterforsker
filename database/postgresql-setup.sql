@@ -1,40 +1,45 @@
 -- OSINT E-post Etterforsker - PostgreSQL Production Database Setup
--- This script sets up the production database with proper users, permissions, and configuration
+-- This script is mounted as a Docker init script and runs automatically on first start.
+-- It runs connected to POSTGRES_DB as POSTGRES_USER (both set via docker-compose env vars).
+--
+-- For manual execution outside Docker:
+--   psql -U postgres -d osint_db -f postgresql-setup.sql
 
--- Create database (run as postgres superuser)
--- CREATE DATABASE osint_db;
+-- ============================================================
+-- Users & permissions
+-- The main application user (osint_user) is created automatically
+-- by the Docker postgres image from POSTGRES_USER / POSTGRES_PASSWORD.
+-- We only need to ensure the read-only reporting user exists.
+-- ============================================================
 
--- Create application user with limited privileges
-CREATE USER osint_user WITH ENCRYPTED PASSWORD 'secure_password_change_in_production';
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'osint_readonly') THEN
+        CREATE ROLE osint_readonly WITH LOGIN PASSWORD 'readonly_change_in_production';
+    END IF;
+END
+$$;
 
--- Grant necessary privileges
-GRANT CONNECT ON DATABASE osint_db TO osint_user;
-GRANT USAGE ON SCHEMA public TO osint_user;
-GRANT CREATE ON SCHEMA public TO osint_user;
-
--- Create tables with proper ownership
-\c osint_db
-
--- Ensure osint_user owns the public schema for migrations
-ALTER SCHEMA public OWNER TO osint_user;
-
--- Grant sequence privileges for auto-incrementing IDs
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO osint_user;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO osint_user;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO osint_user;
-
--- Grant table privileges
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO osint_user;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO osint_user;
-
--- Create read-only user for reporting/analytics
-CREATE USER osint_readonly WITH ENCRYPTED PASSWORD 'readonly_password_change_in_production';
+-- Grant read-only access to reporting user
 GRANT CONNECT ON DATABASE osint_db TO osint_readonly;
 GRANT USAGE ON SCHEMA public TO osint_readonly;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO osint_readonly;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO osint_readonly;
 
--- Performance optimizations
+-- Ensure application user owns the public schema so Alembic can create tables
+ALTER SCHEMA public OWNER TO osint_user;
+
+-- Grant full access to application user
+GRANT ALL PRIVILEGES ON SCHEMA public TO osint_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO osint_user;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO osint_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON TABLES TO osint_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL PRIVILEGES ON SEQUENCES TO osint_user;
+
+-- ============================================================
+-- Extensions
+-- ============================================================
+
 -- Enable UUID extension for better ID generation
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
@@ -44,8 +49,9 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 -- Enable btree_gin for better indexing
 CREATE EXTENSION IF NOT EXISTS btree_gin;
 
--- Create custom functions for OSINT operations
--- Function to calculate lead score based on multiple factors
+-- ============================================================
+-- Custom functions
+-- ============================================================
 CREATE OR REPLACE FUNCTION calculate_lead_score(
     email_verified BOOLEAN,
     social_found BOOLEAN,

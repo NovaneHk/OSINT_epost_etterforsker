@@ -4,14 +4,14 @@ global:
   external_labels:
     monitor: 'osint-monitor'
 
-rule_files:
-  - "alert_rules.yml"
+# rule_files:
+#   - "alert_rules.yml"   # uncomment when alert_rules.yml is created
 
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets:
-          - alertmanager:9093
+# alerting:                # uncomment when alertmanager container is added
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           - alertmanager:9093
 
 scrape_configs:
   # Prometheus self-monitoring
@@ -35,48 +35,42 @@ scrape_configs:
     scrape_interval: 30s
     scrape_timeout: 10s
 
-  # PostgreSQL Database
-  - job_name: 'postgres'
-    static_configs:
-      - targets: ['postgres-exporter:9187']
+  # --- Optional exporters (add containers to docker-compose.yml to enable) ---
+  # - job_name: 'postgres'
+  #   static_configs:
+  #     - targets: ['postgres-exporter:9187']
 
-  # Redis Cache
-  - job_name: 'redis'
-    static_configs:
-      - targets: ['redis-exporter:9121']
+  # - job_name: 'redis'
+  #   static_configs:
+  #     - targets: ['redis-exporter:9121']
 
-  # Node Exporter for system metrics
-  - job_name: 'node-exporter'
-    static_configs:
-      - targets: ['node-exporter:9100']
+  # - job_name: 'node-exporter'
+  #   static_configs:
+  #     - targets: ['node-exporter:9100']
 
-  # Docker container metrics
-  - job_name: 'cadvisor'
-    static_configs:
-      - targets: ['cadvisor:8080']
+  # - job_name: 'cadvisor'
+  #   static_configs:
+  #     - targets: ['cadvisor:8080']
 
-  # Nginx metrics
-  - job_name: 'nginx'
-    static_configs:
-      - targets: ['nginx-exporter:9113']
+  # - job_name: 'nginx'
+  #   static_configs:
+  #     - targets: ['nginx-exporter:9113']
 
-  # Blackbox exporter for endpoint monitoring
-  - job_name: 'blackbox'
-    metrics_path: /probe
-    params:
-      module: [http_2xx]
-    static_configs:
-      - targets:
-        - http://frontend:3000/health
-        - http://backend:8000/health
-        - http://nginx/health
-    relabel_configs:
-      - source_labels: [__address__]
-        target_label: __param_target
-      - source_labels: [__param_target]
-        target_label: instance
-      - target_label: __address__
-        replacement: blackbox-exporter:9115
+  # - job_name: 'blackbox'
+  #   metrics_path: /probe
+  #   params:
+  #     module: [http_2xx]
+  #   static_configs:
+  #     - targets:
+  #       - http://frontend:3000/health
+  #       - http://backend:8000/health
+  #   relabel_configs:
+  #     - source_labels: [__address__]
+  #       target_label: __param_target
+  #     - source_labels: [__param_target]
+  #       target_label: instance
+  #     - target_label: __address__
+  #       replacement: blackbox-exporter:9115
 
   # Custom application metrics
   - job_name: 'osint-metrics'

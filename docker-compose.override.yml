@@ -1,0 +1,34 @@
+# docker-compose.override.yml
+# Development overrides - automatically applied when you run `docker-compose up`
+# Switches nginx to HTTP-only (no SSL certs needed), sets dev environment vars
+# Port remapping to avoid conflicts with other running Docker projects
+
+services:
+  backend:
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - CREATE_TABLES_ON_STARTUP=true
+      - LOG_LEVEL=DEBUG
+
+  frontend:
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_ENVIRONMENT=development
+
+  nginx:
+    volumes:
+      - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf  # HTTP-only, no SSL
+      - ./nginx/logs:/var/log/nginx
+    ports:
+      - "80:80"       # main entrypoint
+
+  # Disable loki + promtail in dev (loki.yml config file not present)
+  # To enable: docker-compose --profile monitoring up
+  loki:
+    profiles:
+      - monitoring
+
+  promtail:
+    profiles:
+      - monitoring

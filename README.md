@@ -2,11 +2,48 @@
 
 Et komplett, profesjonelt OSINT-system for B2B lead-generering med moderne frontend og kraftig backend.
 
-## 📋 Oversikt
+## � Hurtigstart
 
-Dette systemet kombinerer avanserte OSINT-teknikker med en intuitiv, profesjonell frontend for å levere høykvalitets B2B leads. Systemet følger alle GDPR-krav og bransjestandarder.
+1. Klon repositoriet:
+```bash
+git clone https://github.com/NovaneHk/OSINT_epost_etterforsker.git
+cd OSINT_epost_etterforsker
+```
 
-### 🏗️ Arkitektur
+2. Opprett miljøvariabler i `.env`:
+```bash
+SECRET_KEY=your-secret-key
+DATABASE_URL=postgresql://postgres:postgres@db:5432/osint_db
+REDIS_URL=redis://redis:6379
+ENVIRONMENT=development
+```
+
+3. Start systemet:
+```bash
+docker-compose up --build
+```
+
+4. Åpne applikasjonen:
+- Frontend: http://localhost:3000
+- API dokumentasjon: http://localhost:8000/docs
+- Metrics: http://localhost:3001 (Grafana)
+
+## 📋 Systemkrav
+
+- Docker og Docker Compose
+- Python 3.12 eller nyere
+- Node.js 18 eller nyere
+- PostgreSQL 14
+- Redis
+- AWS CLI (for produksjon)
+
+## 🏗️ Arkitektur
+
+- **Backend**: FastAPI med PostgreSQL og Redis
+- **Frontend**: Next.js med TypeScript og Tailwind
+- **Monitoring**: Prometheus og Grafana
+- **Testing**: Pytest, Jest, og Playwright
+- **CI/CD**: GitHub Actions med AWS deployment
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐

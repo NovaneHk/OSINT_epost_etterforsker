@@ -8,7 +8,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Dict, List, Optional, Any
 
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import Boolean, DateTime, Integer, Numeric, String, Text, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -405,7 +405,8 @@ class LeadBase(BaseModel):
     notes: Optional[str] = Field(None, max_length=2000)
     tags: Optional[List[str]] = Field(None)
 
-    @validator('tags')
+    @field_validator('tags')
+    @classmethod
     def validate_tags(cls, v):
         if v is not None:
             # Remove duplicates and empty strings

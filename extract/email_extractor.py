@@ -1,6 +1,3 @@
-class ExtractionResult:
-    def __init__(self, *args, **kwargs):
-        pass
 """
 Email Extraction Module
 Advanced email extraction with role classification and context analysis
@@ -8,8 +5,8 @@ Advanced email extraction with role classification and context analysis
 
 import re
 import logging
-from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass
+from typing import List, Dict, Any, Optional, Set, Tuple
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from core.config import ConfigManager
@@ -17,28 +14,242 @@ from core.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
-# Placeholder class to resolve ImportError in tests
-class ExtractionResult:
-    pass
+# ── New test-compatible dataclasses ──────────────────────────────────────────
 
 @dataclass
 class EmailMatch:
-    """Data class for email extraction results."""
+    """Data class for email extraction results (test-compatible API)."""
     email: str
-    role: str
-    confidence: float
-    context: str
-    source_element: str
+    domain: str
+    local_part: str
+    role: Optional[str] = None
+    context: Optional[str] = None
+    position: int = 0
+    confidence: float = 1.0
+    match_type: str = "standard"
     company_id: Optional[int] = None
+    source_element: Optional[str] = None
+
+    def to_contact(self, source_url: str = "", company: str = "") -> "Any":
+        """Convert to a Contact instance for storage in the contacts table."""
+        from core.database import Contact, ContactStatus
+        return Contact(
+            email=self.email,
+            domain=self.domain,
+            name=None,
+            role=self.role,
+            company=company or None,
+            confidence_score=self.confidence,
+            source_url=source_url or None,
+            source="crawler",
+            status=ContactStatus.UNVALIDATED,
+        )
+
+
+@dataclass
+class ExtractionResult:
+    """Result of an extraction run."""
+    source_url: str
+    email_matches: List[EmailMatch] = field(default_factory=list)
+    total_emails: int = 0
+    unique_domains: Set[str] = field(default_factory=set)
+    extraction_time: float = 0.0
+    success: bool = True
+    error: Optional[str] = None
+    timestamp: Optional[datetime] = None
+
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.now()
+
+
+# ── Extractor ─────────────────────────────────────────────────────────────────
+
+# Generic email pattern
+_EMAIL_RE = re.compile(
+    r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b'
+)
+
 
 class EmailExtractor:
     """Advanced email extraction with role classification."""
 
-    def __init__(self, config_manager: ConfigManager):
-        self.config_manager = config_manager
-        self.db_manager = DatabaseManager()
+    def __init__(self,
+                 min_confidence: float = 0.5,
+                 max_context_chars: int = 100,
+                 exclude_domains: Optional[Set[str]] = None,
+                 exclude_patterns: Optional[List[str]] = None,
+                 config_manager: Optional[ConfigManager] = None):
+        self.min_confidence = min_confidence
+        self.max_context_chars = max_context_chars
+        self.exclude_domains: Set[str] = set(exclude_domains) if exclude_domains else set()
+        self.exclude_patterns: List[re.Pattern] = (
+            [re.compile(p) for p in exclude_patterns] if exclude_patterns else []
+        )
+        # Optional legacy support
+        if config_manager is not None:
+            self.config_manager = config_manager
+            self.db_manager = DatabaseManager()
         self.role_patterns = self._build_role_patterns()
         self.negative_patterns = self._build_negative_patterns()
+
+    # ── Public API (test-compatible) ─────────────────────────────────────────
+
+    def extract_from_text(self, text: str, source_url: str = "") -> ExtractionResult:
+        """Extract emails from plain text."""
+        import time
+        start = time.perf_counter()
+        if text is None:
+            return ExtractionResult(source_url=source_url, success=False, error="No content provided")
+        try:
+            matches = self._find_emails(text)
+            elapsed = time.perf_counter() - start
+            return ExtractionResult(
+                source_url=source_url,
+                email_matches=matches,
+                total_emails=len(matches),
+                unique_domains={m.domain for m in matches},
+                extraction_time=elapsed,
+                success=True,
+            )
+        except Exception as e:
+            return ExtractionResult(
+                source_url=source_url,
+                success=False,
+                error=str(e),
+            )
+
+    def extract_from_html(self, html: str, source_url: str = "") -> ExtractionResult:
+        """Extract emails from HTML content."""
+        import time
+        if html is None:
+            return ExtractionResult(source_url=source_url, success=False, error="No content provided")
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html, 'html.parser')
+            text = f"{html} {soup.get_text(separator=' ')}"
+        except Exception:
+            text = html
+        start = time.time()
+        try:
+            matches = self._find_emails(text)
+            elapsed = time.time() - start
+            return ExtractionResult(
+                source_url=source_url,
+                email_matches=matches,
+                total_emails=len(matches),
+                unique_domains={m.domain for m in matches},
+                extraction_time=elapsed,
+                success=True,
+            )
+        except Exception as e:
+            return ExtractionResult(source_url=source_url, success=False, error=str(e))
+
+    # ── Internal helpers ─────────────────────────────────────────────────────
+
+    def _find_emails(self, text: str) -> List[EmailMatch]:
+        """Find all valid emails in text, applying filters."""
+        results: List[EmailMatch] = []
+
+        for m in _EMAIL_RE.finditer(text):
+            email = m.group()
+            if not self._is_valid_email(email):
+                continue
+
+            local, domain = email.split('@', 1)
+            if domain.lower() in self.exclude_domains:
+                continue
+
+            if any(p.search(email) for p in self.exclude_patterns):
+                continue
+
+            context = self._extract_context(text, m.start(), m.end())
+            confidence = self._calculate_confidence(email, context)
+            role = self._detect_role(email, context)
+
+            if confidence < self.min_confidence:
+                continue
+
+            results.append(EmailMatch(
+                email=email,
+                domain=domain.lower(),
+                local_part=local,
+                role=role,
+                context=context,
+                position=m.start(),
+                confidence=confidence,
+            ))
+
+        return results
+
+    def _calculate_confidence(self, email: str, context: Optional[str] = None) -> float:
+        """Calculate confidence score for an email match."""
+        score = 1.0
+        local, domain = email.lower().split('@', 1)
+        # Lower confidence for generic local parts
+        generic = {'info', 'contact', 'support', 'admin', 'mail', 'hello', 'webmaster'}
+        if local in generic:
+            score -= 0.15
+        if domain.split('.')[-1] in {'z'} or len(domain.split('.')[-1]) < 2:
+            score -= 0.45
+        if domain in {'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'aol.com', 'icloud.com'}:
+            score -= 0.25
+        if len(local) <= 1:
+            score -= 0.2
+        # Boost if context has business keywords
+        if context:
+            ctx_lower = context.lower()
+            for kw in ('ceo', 'cto', 'manager', 'director', 'engineer', 'sales'):
+                if kw in ctx_lower:
+                    score = min(1.0, score + 0.05)
+            for kw in ('personal', 'private', 'home', 'individual'):
+                if kw in ctx_lower:
+                    score -= 0.2
+        return max(0.0, min(1.0, score))
+
+    def _extract_context(self, text: str, start: int, end: int) -> str:
+        """Extract surrounding context."""
+        ctx_start = max(0, start - self.max_context_chars)
+        ctx_end = min(len(text), end + self.max_context_chars)
+        return text[ctx_start:ctx_end].strip()
+
+    def _is_valid_email(self, email: str) -> bool:
+        """Basic email validation."""
+        if not email or email.count('@') != 1:
+            return False
+        local, domain = email.split('@', 1)
+        if not local or not domain or domain.startswith('.') or domain.endswith('.'):
+            return False
+        return bool(_EMAIL_RE.fullmatch(email))
+
+    def _detect_role(self, email: str, context: Optional[str]) -> Optional[str]:
+        """Infer a coarse role from the email local part or surrounding context."""
+        local_part = email.split('@', 1)[0].lower()
+        for role_name, pattern in self.role_patterns.items():
+            if pattern.search(email):
+                return role_name
+        if context:
+            ctx_lower = context.lower()
+            for role_name in self.role_patterns:
+                if role_name in ctx_lower:
+                    return role_name
+        role_keywords = {
+            'executive': {'ceo', 'cto', 'cfo', 'coo', 'chief', 'director', 'vp'},
+            'technical': {'tech', 'engineering', 'dev', 'developer', 'architect'},
+            'operations': {'ops', 'operations', 'admin'},
+            'sales': {'sales', 'business', 'revenue'},
+            'marketing': {'marketing', 'press', 'brand'},
+            'support': {'support', 'help', 'service', 'contact', 'info'},
+            'finance': {'finance', 'accounting', 'billing'},
+            'hr': {'hr', 'careers', 'recruiting', 'talent'},
+            'procurement': {'procurement', 'purchasing', 'buyer', 'sourcing'},
+        }
+        for role_name, keywords in role_keywords.items():
+            if any(keyword in local_part for keyword in keywords):
+                return role_name
+        return None
+
+    # ── Legacy compatibility (role-based extraction) ──────────────────────────
 
     def _build_role_patterns(self) -> Dict[str, re.Pattern]:
         """Build comprehensive role-based email patterns."""
@@ -139,19 +350,12 @@ class EmailExtractor:
             for match in email_matches:
                 if match.confidence >= min_confidence:
                     if not role_based_only or self._is_role_based_email(match.email):
-                        # Store in database
-                        email_data = {
-                            'email': match.email,
-                            'role': match.role,
-                            'confidence': match.confidence,
-                            'context': match.context,
-                            'company_id': match.company_id,
-                            'source_url': company.get('url', ''),
-                            'source_type': company.get('source_type', 'unknown'),
-                            'extracted_at': datetime.now().isoformat()
-                        }
-
-                        self.db_manager.store_email(email_data)
+                        # Store in contacts table via canonical bridge
+                        contact = match.to_contact(
+                            source_url=company.get('url', ''),
+                            company=company.get('name', '')
+                        )
+                        self.db_manager.add_contact(contact)
                         extracted_emails.append(match)
                         total_emails += 1
                         total_confidence += match.confidence
@@ -167,39 +371,9 @@ class EmailExtractor:
 
     def extract_emails_with_context(self, html_content: str, source_url: str,
                                    company_id: Optional[int] = None) -> List[EmailMatch]:
-        """Extract emails with surrounding context and role classification."""
-
-        matches = []
-
-        for role_type, pattern in self.role_patterns.items():
-            for match in pattern.finditer(html_content):
-                email = match.group()
-
-                # Skip if matches negative patterns
-                if self._matches_negative_patterns(email):
-                    continue
-
-                # Extract surrounding context (200 chars before and after)
-                start_pos = max(0, match.start() - 200)
-                end_pos = min(len(html_content), match.end() + 200)
-                context = html_content[start_pos:end_pos]
-
-                # Analyze context for confidence scoring
-                confidence = self._calculate_confidence(email, role_type, context)
-
-                # Determine source element (if within specific HTML elements)
-                source_element = self._identify_source_element(html_content, match.start())
-
-                matches.append(EmailMatch(
-                    email=email,
-                    role=role_type,
-                    confidence=confidence,
-                    context=context.strip(),
-                    source_element=source_element,
-                    company_id=company_id
-                ))
-
-        return self._deduplicate_matches(matches)
+        """Extract emails with surrounding context and role classification (legacy API)."""
+        result = self.extract_from_html(html_content, source_url=source_url)
+        return result.email_matches
 
     def _simulate_company_html(self, company: Dict[str, Any]) -> str:
         """Simulate HTML content for a company (for demonstration)."""
@@ -278,8 +452,8 @@ class EmailExtractor:
 
         return any(prefix in local_part for prefix in role_prefixes)
 
-    def _calculate_confidence(self, email: str, role_type: str, context: str) -> float:
-        """Calculate confidence score for email-role match."""
+    def _calculate_role_confidence(self, email: str, role_type: str, context: str) -> float:
+        """Calculate confidence score for email-role match (legacy)."""
 
         confidence = 0.5  # Base confidence
 
@@ -295,50 +469,23 @@ class EmailExtractor:
             if indicator.lower() in context.lower():
                 confidence -= 0.2
 
-        # Role-specific confidence adjustments
-        local_part = email.split('@')[0].lower()
-
-        if role_type == 'executive':
-            exec_terms = ['ceo', 'cto', 'cfo', 'president', 'director']
-            if any(term in local_part for term in exec_terms):
-                confidence += 0.3
-        elif role_type == 'technical':
-            tech_terms = ['tech', 'dev', 'engineering', 'it']
-            if any(term in local_part for term in tech_terms):
-                confidence += 0.2
-        elif role_type == 'support':
-            support_terms = ['support', 'help', 'contact', 'service']
-            if any(term in local_part for term in support_terms):
-                confidence += 0.2
-        elif role_type == 'procurement':
-            proc_terms = ['procurement', 'purchasing', 'sourcing', 'buyer']
-            if any(term in local_part for term in proc_terms):
-                confidence += 0.3
-
-        # HTML structure confidence boost
-        if '<a href="mailto:' in context:
-            confidence += 0.1  # Properly formatted mailto link
-
         return max(0.0, min(1.0, confidence))
 
     def _identify_source_element(self, html_content: str, position: int) -> str:
         """Identify the HTML element containing the email."""
 
-        # Look backwards and forwards from position to find HTML tags
         before_content = html_content[:position]
-        after_content = html_content[position:]
 
-        # Find the most recent opening tag before the email
         tag_match = re.search(r'<(\w+)[^>]*>(?!.*<\w+[^>]*>)', before_content[::-1])
         if tag_match:
-            return tag_match.group(1)[::-1]  # Reverse the tag name back
+            return tag_match.group(1)[::-1]
 
         return 'unknown'
 
     def _deduplicate_matches(self, matches: List[EmailMatch]) -> List[EmailMatch]:
         """Remove duplicate email matches, keeping the highest confidence."""
 
-        email_dict = {}
+        email_dict: Dict[str, EmailMatch] = {}
 
         for match in matches:
             email = match.email.lower()

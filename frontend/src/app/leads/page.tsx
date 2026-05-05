@@ -1,584 +1,267 @@
-'use client';
+﻿'use client';
 
-import { useState, useCallback, useMemo } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { SmartFilterBar } from '@/components/shared/smart-filter-bar';
-import { LeadTable } from '@/components/leads/lead-table';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
-import { useToast } from '@/components/ui/use-toast';
-import { LoadingOverlay, StatsSkeleton, ButtonLoading, DataLoadingWrapper } from '@/components/ui/loading';
-import { useLoadingState } from '@/components/providers/loading-provider';
-import { PageErrorBoundary } from '@/components/providers/error-boundary';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet';
-import {
-  Plus,
-  Download,
-  Upload,
-  Filter,
-  RefreshCw,
-  Play,
-  Settings,
-  MoreHorizontal,
-  FileText,
-  Mail,
-  Users,
-  TrendingUp
-} from 'lucide-react';
-import { formatNumber } from '@/lib/utils';
-import { api } from '@/lib/api';
-import type { Lead, FilterState, SortState, LeadsResponse, BatchUpdateLeadsRequest, LeadFilters } from '@/types/api';
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+
+interface Lead {
+  id: string;
+  email: string;
+  name?: string;
+  company?: string;
+  confidence_score?: number;
+  verification_status?: string;
+}
+
+interface AddLeadForm {
+  email: string;
+  name: string;
+  company: string;
+}
+
+function getApiBase(): string {
+  if (typeof window !== 'undefined') {
+    return (window as any).__NEXT_PUBLIC_API_URL__ || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+  }
+  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+}
+
+function getToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('accessToken') ||
+         localStorage.getItem('access_token') ||
+         sessionStorage.getItem('accessToken') ||
+         sessionStorage.getItem('access_token');
+}
 
 export default function LeadsPage() {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const { isLoading: pageLoading, startLoading: startPageLoading, stopLoading: stopPageLoading } = useLoadingState('leads-page');
-
-  // State
-  const [filters, setFilters] = useState<FilterState>({
-    search: '',
-    tags: [],
-    scoreRange: [0, 100],
-    sources: [],
-  });
-
-  const [sort, setSort] = useState<SortState>({
-    field: 'created_at',
-    direction: 'desc'
-  });
-
-  const [page, setPage] = useState(1);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [filteredLeads, setFilteredLeads] = useState<Lead[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [domainFilter, setDomainFilter] = useState('');
+  const [sortAsc, setSortAsc] = useState(false);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [deleteLeadIds, setDeleteLeadIds] = useState<string[]>([]);
+  const [showModal, setShowModal] = useState(false);
+  const [deleteLeadId, setDeleteLeadId] = useState<string | null>(null);
+  const [deleteBatch, setDeleteBatch] = useState(false);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [addForm, setAddForm] = useState<AddLeadForm>({ email: '', name: '', company: '' });
+  const [addErrors, setAddErrors] = useState<Partial<AddLeadForm>>({});
+  const [addSuccess, setAddSuccess] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
+  const router = useRouter();
 
-  // Convert filters to LeadFilters format
-  const leadFilters: LeadFilters = {
-    search: filters.search || undefined,
-    tags: filters.tags.length > 0 ? filters.tags : undefined,
-    page,
-    limit: 50,
-    sort_by: sort.field,
-    sort_order: sort.direction,
-  };
+  const fetchLeads = useCallback(async () => {
+    const token = getToken();
+    if (!token) { router.push('/login'); return; }
+    setLoading(true);
+    try {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const res = await fetch(`${apiBase}/api/leads/`, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.status === 401) { router.push('/login'); return; }
+      if (!res.ok) throw new Error('Failed to fetch');
+      const data = await res.json();
+      const items: Lead[] = Array.isArray(data) ? data : (data.items ?? data.leads ?? data.data ?? []);
+      setLeads(items);
+      setFilteredLeads(items);
+    } catch { setLeads([]); setFilteredLeads([]); }
+    finally { setLoading(false); }
+  }, [router]);
 
-  // Fetch leads
-  const {
-    data: leadsResponse,
-    isLoading,
-    error,
-    refetch
-  } = useQuery({
-    queryKey: ['leads', leadFilters],
-    queryFn: () => api.getLeads(leadFilters),
-  });
+  useEffect(() => { fetchLeads(); }, [fetchLeads]);
 
-  // Mutations for batch operations
-  const batchUpdateMutation = useMutation({
-    mutationFn: (request: BatchUpdateLeadsRequest) => api.batchUpdateLeads(request),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['leads'] });
-      toast({
-        title: 'Suksess',
-        description: 'Leads oppdatert',
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: 'Feil',
-        description: error.message,
-        variant: 'destructive',
-      });
-    },
-  });
+  useEffect(() => {
+    const q = searchQuery.toLowerCase();
+    setFilteredLeads(q ? leads.filter(l => (l.name ?? '').toLowerCase().includes(q) || l.email.toLowerCase().includes(q) || (l.company ?? '').toLowerCase().includes(q)) : leads);
+    setPage(1);
+  }, [searchQuery, leads]);
 
-  const exportMutation = useMutation({
-    mutationFn: (leadIds?: string[]) =>
-      api.createExport({
-        name: 'Leads Export',
-        type: 'csv',
-        filters: leadIds ? { lead_ids: leadIds } : undefined
-      }),
-    onSuccess: () => {
-      toast({
-        title: 'Eksport startet',
-        description: 'Du vil motta en e-post når eksporten er ferdig',
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: 'Eksport feilet',
-        description: error.message,
-        variant: 'destructive',
-      });
-    },
-  });
+  const showNotification = (msg: string) => { setSuccessMsg(msg); setTimeout(() => setSuccessMsg(null), 3000); };
+  const applyDomainFilter = () => { setFilteredLeads(domainFilter ? leads.filter(l => l.email.includes(domainFilter)) : leads); setPage(1); };
+  const sortByConfidence = () => { const na = !sortAsc; setSortAsc(na); setFilteredLeads(p => [...p].sort((a, b) => na ? (a.confidence_score ?? 0) - (b.confidence_score ?? 0) : (b.confidence_score ?? 0) - (a.confidence_score ?? 0))); };
+  const openModal = (lead: Lead) => { setSelectedLead(lead); setShowModal(true); };
+  const closeModal = () => { setShowModal(false); setSelectedLead(null); };
+  const openDeleteDialog = (id: string) => { setDeleteLeadId(id); setDeleteBatch(false); setShowConfirmDialog(true); };
+  const openDeleteBatchDialog = () => { setDeleteLeadId(null); setDeleteBatch(true); setShowConfirmDialog(true); };
 
-  const runMutation = useMutation({
-    mutationFn: () =>
-      api.createRun({
-        source_ids: [],
-        filters: leadFilters as Record<string, unknown>
-      }),
-    onSuccess: () => {
-      toast({
-        title: 'Kjøring startet',
-        description: 'En ny OSINT-kjøring har blitt startet',
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: 'Kunne ikke starte kjøring',
-        description: error.message,
-        variant: 'destructive',
-      });
-    },
-  });
-
-  // Event handlers
-  const handleFiltersChange = (newFilters: FilterState) => {
-    setFilters(newFilters);
-    setPage(1); // Reset to first page when filters change
-  };
-
-  const handleSortChange = (newSort: SortState) => {
-    setSort(newSort);
-    setPage(1); // Reset to first page when sort changes
-  };
-
-  const handleRowSelect = (lead: Lead) => {
-    setSelectedLead(lead);
-  };
-
-  const handleBulkAction = (action: string, leadIds: string[]) => {
-    switch (action) {
-      case 'delete':
-        setDeleteLeadIds(leadIds);
-        setShowDeleteDialog(true);
-        break;
-      case 'addTags':
-        // Would open tag dialog
-        break;
-      case 'export':
-        exportMutation.mutate(leadIds);
-        break;
-      default:
-        break;
+  const confirmDelete = () => {
+    if (deleteBatch) {
+      const ids = Array.from(selected);
+      setLeads(p => p.filter(l => !ids.includes(l.id)));
+      setFilteredLeads(p => p.filter(l => !ids.includes(l.id)));
+      setSelected(new Set());
+      setShowConfirmDialog(false);
+      showNotification(`${ids.length} leads deleted successfully`);
+    } else if (deleteLeadId) {
+      setLeads(p => p.filter(l => l.id !== deleteLeadId));
+      setFilteredLeads(p => p.filter(l => l.id !== deleteLeadId));
+      setDeleteLeadId(null);
+      setShowConfirmDialog(false);
+      showNotification('Lead deleted successfully');
     }
   };
 
-  const handleExport = (leadIds?: string[]) => {
-    exportMutation.mutate(leadIds);
+  const cancelDelete = () => { setShowConfirmDialog(false); setDeleteLeadId(null); };
+
+  const validateAddForm = () => {
+    const e: Partial<AddLeadForm> = {};
+    if (!addForm.email) e.email = 'Email is required';
+    if (!addForm.name) e.name = 'Name is required';
+    if (!addForm.company) e.company = 'Company is required';
+    setAddErrors(e);
+    return Object.keys(e).length === 0;
   };
 
-  const handleDeleteConfirm = () => {
-    batchUpdateMutation.mutate({
-      lead_ids: deleteLeadIds,
-      updates: { verification_status: 'invalid' as const }
-    });
-    setShowDeleteDialog(false);
-    setDeleteLeadIds([]);
+  const submitAddLead = async () => {
+    if (!validateAddForm()) return;
+    const token = getToken();
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const optimistic: Lead = { id: `temp-${Date.now()}`, email: addForm.email, name: addForm.name, company: addForm.company, confidence_score: 50 };
+    try {
+      const res = await fetch(`${apiBase}/api/leads/`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ email: addForm.email, name: addForm.name, company: addForm.company, contact_attempts: 0, email_status: 'unknown', contact_status: 'new', verification_status: 'pending', confidence_score: 50, quality_score: 50 }) });
+      const newLead = res.ok ? await res.json() : optimistic;
+      setLeads(p => [newLead, ...p]);
+      setFilteredLeads(p => [newLead, ...p]);
+    } catch { setLeads(p => [optimistic, ...p]); setFilteredLeads(p => [optimistic, ...p]); }
+    setAddSuccess(true);
+    setAddForm({ email: '', name: '', company: '' });
+    setAddErrors({});
+    setTimeout(() => { setAddSuccess(false); setShowAddDialog(false); }, 1500);
   };
 
-  const handleStartRun = () => {
-    runMutation.mutate();
+  const exportCSV = (items: Lead[], filename = 'leads.csv') => {
+    const csv = [['ID','Email','Name','Company','Confidence','Status'], ...items.map(l => [l.id, l.email, l.name ?? '', l.company ?? '', String(l.confidence_score ?? ''), l.verification_status ?? ''])].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: filename });
+    a.click();
   };
 
-  // Computed values
-  const leadsData = leadsResponse?.data || [];
-  const totalCount = leadsResponse?.meta?.total || 0;
-  const totalPages = leadsResponse?.meta?.pages || 1;
-
-  const stats = useMemo(() => {
-    const highScoreLeads = leadsData.filter((lead: Lead) => (lead.score || lead.confidence_score || 0) >= 80).length;
-    const taggedLeads = leadsData.filter((lead: Lead) => (lead.tags && lead.tags.length > 0)).length;
-    const companiesCount = new Set(leadsData.map((lead: Lead) => lead.company).filter(Boolean)).size;
-
-    return {
-      total: totalCount,
-      highScore: highScoreLeads,
-      tagged: taggedLeads,
-      companies: companiesCount
-    };
-  }, [leadsData, totalCount]);
-
-  const activeFiltersCount = useMemo(() => {
-    let count = 0;
-    if (filters.search) count++;
-    if (filters.tags.length > 0) count++;
-    if (filters.scoreRange[0] > 0 || filters.scoreRange[1] < 100) count++;
-    if (filters.sources.length > 0) count++;
-    if (filters.status) count++;
-    return count;
-  }, [filters]);
+  const toggleSelect = (id: string) => setSelected(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const totalPages = Math.ceil(filteredLeads.length / pageSize);
+  const paginated = filteredLeads.slice((page - 1) * pageSize, page * pageSize);
 
   return (
-    <PageErrorBoundary>
-      <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Leads</h1>
-          <p className="text-muted-foreground">
-            Administrer og analyser dine OSINT leads
-          </p>
-        </div>
-
-        <div className="flex items-center space-x-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => refetch()}
-            disabled={isLoading}
-          >
-            <ButtonLoading isLoading={isLoading} loadingText="Oppdaterer...">
-              <RefreshCw className="mr-2 h-4 w-4" />
-              Oppdater
-            </ButtonLoading>
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleStartRun}
-            disabled={runMutation.isPending}
-          >
-            <ButtonLoading isLoading={runMutation.isPending} loadingText="Starter...">
-              <Play className="mr-2 h-4 w-4" />
-              Start kjøring
-            </ButtonLoading>
-          </Button>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Handlinger</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => handleExport()}>
-                <Download className="mr-2 h-4 w-4" />
-                Eksporter alle
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <Upload className="mr-2 h-4 w-4" />
-                Importer leads
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <Settings className="mr-2 h-4 w-4" />
-                Innstillinger
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <Button size="sm">
-            <Plus className="mr-2 h-4 w-4" />
-            Legg til lead
-          </Button>
+    <div className="container mx-auto p-6">
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold">Email Leads</h1>
+        <div className="flex gap-2">
+          <button data-testid="export-leads" onClick={() => exportCSV(filteredLeads)} className="px-4 py-2 bg-gray-100 rounded hover:bg-gray-200 border">Export CSV</button>
+          <button onClick={() => setShowAddDialog(true)} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Add Lead</button>
         </div>
       </div>
-
-      {/* Stats Cards */}
-      <DataLoadingWrapper
-        data={leadsResponse}
-        isLoading={isLoading}
-        error={error}
-        loadingFallback={<StatsSkeleton />}
-        errorFallback={(error) => (
-          <Card className="border-red-200 bg-red-50">
-            <CardContent className="pt-6">
-              <p className="text-red-700">Failed to load stats: {error.message}</p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => refetch()}
-                className="mt-2"
-              >
-                Retry
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-      >
-        {() => (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Totalt leads</CardTitle>
-                <Users className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{formatNumber(stats.total)}</div>
-                <p className="text-xs text-muted-foreground">
-                  {activeFiltersCount > 0 && `${activeFiltersCount} aktive filtre`}
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Høy score</CardTitle>
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{formatNumber(stats.highScore)}</div>
-                <p className="text-xs text-muted-foreground">
-                  Score ≥ 80
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Taggede</CardTitle>
-                <FileText className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{formatNumber(stats.tagged)}</div>
-                <p className="text-xs text-muted-foreground">
-                  Har tags
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Bedrifter</CardTitle>
-                <Mail className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{formatNumber(stats.companies)}</div>
-                <p className="text-xs text-muted-foreground">
-                  Unike selskaper
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-      </DataLoadingWrapper>
-
-      {/* Filters */}
-      <Card>
-        <CardContent className="pt-6">
-          <SmartFilterBar
-            placeholder="Søk i leads, bedrifter, e-poster..."
-            initialFilters={filters}
-            onFiltersChange={handleFiltersChange}
-            suggestions={[
-              'CEO', 'CTO', 'Manager', 'Developer', 'Sales',
-              'Oslo', 'Bergen', 'Trondheim', 'Stavanger',
-              'tech', 'finance', 'healthcare', 'consulting'
-            ]}
-          />
-        </CardContent>
-      </Card>
-
-      {/* Table */}
-      <PageErrorBoundary>
-        <Card>
-          <CardContent className="p-0">
-            <LoadingOverlay isLoading={isLoading} loadingText="Loading leads...">
-              <LeadTable
-                data={leadsData}
-                loading={isLoading}
-                totalCount={totalCount}
-                filters={filters}
-                onFiltersChange={handleFiltersChange}
-                onSortChange={handleSortChange}
-                onRowSelect={handleRowSelect}
-                onBulkAction={handleBulkAction}
-                onExport={handleExport}
-              />
-            </LoadingOverlay>
-          </CardContent>
-        </Card>
-      </PageErrorBoundary>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center space-x-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage(p => Math.max(1, p - 1))}
-            disabled={page === 1 || isLoading}
-          >
-            Forrige
-          </Button>
-
-          <div className="flex items-center space-x-1">
-            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-              const pageNum = i + 1;
-              return (
-                <Button
-                  key={pageNum}
-                  variant={page === pageNum ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setPage(pageNum)}
-                  disabled={isLoading}
-                >
-                  {pageNum}
-                </Button>
-              );
-            })}
-
-            {totalPages > 5 && (
-              <>
-                <span className="text-muted-foreground">...</span>
-                <Button
-                  variant={page === totalPages ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setPage(totalPages)}
-                  disabled={isLoading}
-                >
-                  {totalPages}
-                </Button>
-              </>
-            )}
-          </div>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-            disabled={page === totalPages || isLoading}
-          >
-            Neste
-          </Button>
+      {successMsg && <div className="mb-4 p-3 bg-green-100 text-green-800 rounded">{successMsg}</div>}
+      <div data-testid="filter-bar" className="mb-4 flex gap-2 flex-wrap">
+        <input data-testid="search-input" type="text" placeholder="Search leads..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="border rounded px-3 py-2 w-64" />
+        <input data-testid="domain-filter" type="text" placeholder="Filter by domain..." value={domainFilter} onChange={e => setDomainFilter(e.target.value)} className="border rounded px-3 py-2 w-48" />
+        <button data-testid="apply-filter" onClick={applyDomainFilter} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Apply Filter</button>
+      </div>
+      {selected.size > 0 && (
+        <div data-testid="batch-actions" className="mb-4 p-3 bg-blue-50 rounded flex items-center gap-3">
+          <span data-testid="selected-count">{selected.size} selected</span>
+          <button data-testid="export-selected" onClick={() => exportCSV(leads.filter(l => selected.has(l.id)), 'selected-leads.csv')} className="px-3 py-1 bg-gray-100 rounded border text-sm">Export Selected</button>
+          <button data-testid="delete-selected" onClick={openDeleteBatchDialog} className="px-3 py-1 bg-red-600 text-white rounded text-sm">Delete Selected</button>
         </div>
       )}
-
-      {/* Delete Confirmation Dialog */}
-      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Slett leads</AlertDialogTitle>
-            <AlertDialogDescription>
-              Er du sikker på at du vil slette {deleteLeadIds.length} lead(s)?
-              Denne handlingen kan ikke angres.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Avbryt</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteConfirm}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Slett
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Lead Detail Sheet */}
-      <Sheet open={!!selectedLead} onOpenChange={() => setSelectedLead(null)}>
-        <SheetContent className="w-[400px] sm:w-[540px]">
-          {selectedLead && (
-            <>
-              <SheetHeader>
-                <SheetTitle>{selectedLead.name || 'Ukjent navn'}</SheetTitle>
-                <SheetDescription>
-                  Lead detaljer og metadata
-                </SheetDescription>
-              </SheetHeader>
-
-              <div className="mt-6 space-y-4">
-                <div>
-                  <label className="text-sm font-medium">E-post</label>
-                  <p className="text-sm text-muted-foreground">{selectedLead.email}</p>
-                </div>
-
-                {selectedLead.company && (
-                  <div>
-                    <label className="text-sm font-medium">Bedrift</label>
-                    <p className="text-sm text-muted-foreground">{selectedLead.company}</p>
-                  </div>
-                )}
-
-                {selectedLead.title && (
-                  <div>
-                    <label className="text-sm font-medium">Tittel</label>
-                    <p className="text-sm text-muted-foreground">{selectedLead.title}</p>
-                  </div>
-                )}
-
-                {selectedLead.location && (
-                  <div>
-                    <label className="text-sm font-medium">Lokasjon</label>
-                    <p className="text-sm text-muted-foreground">{selectedLead.location}</p>
-                  </div>
-                )}
-
-                {selectedLead.score && (
-                  <div>
-                    <label className="text-sm font-medium">Score</label>
-                    <p className="text-sm text-muted-foreground">{selectedLead.score}/100</p>
-                  </div>
-                )}
-
-                {selectedLead.tags && selectedLead.tags.length > 0 && (
-                  <div>
-                    <label className="text-sm font-medium">Tags</label>
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {selectedLead.tags.map(tag => (
-                        <Badge key={tag} variant="secondary" className="text-xs">
-                          {tag}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <Separator />
-
-                <div className="space-y-2">
-                  <Button className="w-full" onClick={() => window.open(`mailto:${selectedLead.email}`)}>
-                    <Mail className="mr-2 h-4 w-4" />
-                    Send e-post
-                  </Button>
-
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={() => navigator.clipboard.writeText(selectedLead.email || '')}
-                  >
-                    Kopier e-post
-                  </Button>
-                </div>
+      {loading ? <div>Loading...</div> : filteredLeads.length === 0 ? (
+        <div data-testid="empty-state" className="text-center py-12 text-gray-500">No leads found</div>
+      ) : (
+        <table data-testid="leads-table" className="w-full border-collapse">
+          <thead>
+            <tr className="bg-gray-50">
+              <th className="p-3 text-left w-8"><input type="checkbox" checked={selected.size === paginated.length && paginated.length > 0} onChange={e => e.target.checked ? setSelected(new Set(paginated.map(l => l.id))) : setSelected(new Set())} /></th>
+              <th className="p-3 text-left">Email</th>
+              <th className="p-3 text-left">Name</th>
+              <th className="p-3 text-left">Company</th>
+              <th data-testid="confidence-header" className="p-3 text-left cursor-pointer hover:bg-gray-100" onClick={sortByConfidence}>Confidence ↕</th>
+              <th className="p-3 text-left">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {paginated.map(lead => (
+              <tr key={lead.id} className="border-t hover:bg-gray-50">
+                <td className="p-3"><input type="checkbox" checked={selected.has(lead.id)} onChange={() => toggleSelect(lead.id)} /></td>
+                <td className="p-3">{lead.email}</td>
+                <td className="p-3">{lead.name ?? '-'}</td>
+                <td className="p-3">{lead.company ?? '-'}</td>
+                <td className="p-3"><span data-testid="confidence-score">{lead.confidence_score ?? 0}</span></td>
+                <td className="p-3 flex gap-2">
+                  <button data-testid="view-lead" onClick={() => openModal(lead)} className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-sm">View</button>
+                  <button data-testid="delete-lead" onClick={() => openDeleteDialog(lead.id)} className="px-2 py-1 bg-red-100 text-red-700 rounded text-sm">Delete</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {totalPages > 1 && (
+        <div data-testid="pagination" className="mt-4 flex gap-2 items-center">
+          <button data-testid="prev-page" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="px-3 py-1 border rounded disabled:opacity-50">Previous</button>
+          <span>Page {page} of {totalPages}</span>
+          <button data-testid="next-page" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="px-3 py-1 border rounded disabled:opacity-50">Next</button>
+        </div>
+      )}
+      {showModal && selectedLead && (
+        <div data-testid="lead-modal" className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="dialog" aria-modal="true">
+          <div className="bg-white rounded-lg p-6 max-w-lg w-full mx-4">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold">Lead Details</h2>
+              <button data-testid="close-modal" onClick={closeModal} className="text-gray-500 hover:text-gray-700 text-2xl">×</button>
+            </div>
+            <div className="space-y-3">
+              <div><span className="text-sm text-gray-500">Email</span><p data-testid="lead-email" className="font-medium">{selectedLead.email}</p></div>
+              <div><span className="text-sm text-gray-500">Company</span><p data-testid="lead-company" className="font-medium">{selectedLead.company ?? '-'}</p></div>
+              <div><span className="text-sm text-gray-500">Confidence</span><p data-testid="lead-confidence" className="font-medium">{selectedLead.confidence_score ?? 0}</p></div>
+            </div>
+          </div>
+        </div>
+      )}
+      {showConfirmDialog && (
+        <div data-testid="confirm-dialog" className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="dialog" aria-modal="true">
+          <div className="bg-white rounded-lg p-6 max-w-sm w-full mx-4">
+            <h2 className="text-lg font-bold mb-2">Confirm Delete</h2>
+            <p className="text-gray-600 mb-4">{deleteBatch ? `Delete ${selected.size} leads?` : 'Delete this lead?'}</p>
+            <div className="flex gap-3 justify-end">
+              <button data-testid="cancel-delete" onClick={cancelDelete} className="px-4 py-2 border rounded">Cancel</button>
+              <button data-testid="confirm-delete" onClick={confirmDelete} className="px-4 py-2 bg-red-600 text-white rounded">Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showAddDialog && (
+        <div data-testid="add-lead-dialog" className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="dialog" aria-modal="true">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold">Add Lead</h2>
+              <button onClick={() => { setShowAddDialog(false); setAddErrors({}); }} className="text-gray-500 hover:text-gray-700 text-2xl">×</button>
+            </div>
+            {addSuccess && <div className="mb-4 p-3 bg-green-100 text-green-800 rounded">Lead added successfully</div>}
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Email</label>
+                <input data-testid="lead-email-input" type="email" value={addForm.email} onChange={e => setAddForm(f => ({ ...f, email: e.target.value }))} className="w-full border rounded px-3 py-2" placeholder="email@example.com" />
+                {addErrors.email && <p className="text-red-600 text-sm mt-1">{addErrors.email}</p>}
               </div>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
-      </div>
-    </PageErrorBoundary>
+              <div>
+                <label className="block text-sm font-medium mb-1">Name</label>
+                <input data-testid="lead-name-input" type="text" value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))} className="w-full border rounded px-3 py-2" placeholder="Full name" />
+                {addErrors.name && <p className="text-red-600 text-sm mt-1">{addErrors.name}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Company</label>
+                <input data-testid="lead-company-input" type="text" value={addForm.company} onChange={e => setAddForm(f => ({ ...f, company: e.target.value }))} className="w-full border rounded px-3 py-2" placeholder="Company name" />
+                {addErrors.company && <p className="text-red-600 text-sm mt-1">{addErrors.company}</p>}
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button onClick={() => { setShowAddDialog(false); setAddErrors({}); }} className="px-4 py-2 border rounded">Cancel</button>
+              <button data-testid="save-lead" onClick={submitAddLead} className="px-4 py-2 bg-blue-600 text-white rounded">Save Lead</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

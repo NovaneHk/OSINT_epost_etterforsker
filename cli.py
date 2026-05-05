@@ -139,7 +139,7 @@ def extract(
 
     console.print("[bold blue][EMAIL] Extracting emails from crawled data[/bold blue]")
 
-    extractor = EmailExtractor(config_manager)
+    extractor = EmailExtractor(config_manager=config_manager)
 
     with Progress(
         TextColumn("[progress.description]{task.description}"),
@@ -170,7 +170,7 @@ def enrich(
     console.print("[bold blue][ENRICH] Enriching company data[/bold blue]")
 
     from enrich.enricher import DataEnricher
-    enricher = DataEnricher(config_manager)
+    enricher = DataEnricher(config={}, db_manager=db_manager)
 
     with Progress(
         TextColumn("[progress.description]{task.description}"),
@@ -200,7 +200,7 @@ def validate(
 
     console.print("[bold blue][VALIDATE] Validating email addresses[/bold blue]")
 
-    validator = EmailValidator(config_manager)
+    validator = EmailValidator(config_manager=config_manager)
 
     with Progress(
         TextColumn("[progress.description]{task.description}"),
@@ -346,7 +346,7 @@ def health_check():
     console.print("[bold blue][HEALTH] Performing system health check[/bold blue]")
 
     from monitoring.health import HealthChecker
-    checker = HealthChecker(config_manager)
+    checker = HealthChecker()
 
     results = checker.run_all_checks()
 

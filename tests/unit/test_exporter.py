@@ -282,7 +282,7 @@ class TestDataExporter:
             data = json.load(jsonfile)
             assert isinstance(data, dict)
             assert 'contacts' in data
-            assert 'metadata' in data
+            assert 'export_metadata' in data
             assert len(data['contacts']) > 0
             assert 'email' in data['contacts'][0]
 
@@ -433,7 +433,7 @@ class TestDataExporter:
         assert len(data) == 1
         assert data[0]['overall_score'] == 0.85  # From mock scorer
         assert data[0]['confidence'] == 0.9
-        assert data[0]['best_persona'] == "technical_leaders"
+        assert data[0]['persona_match'] == "technical_leaders"
 
     def test_generate_filename(self, exporter):
         """Test automatic filename generation"""
@@ -496,7 +496,7 @@ class TestDataExporter:
 
         with open(output_file, 'r', encoding='utf-8') as jsonfile:
             data = json.load(jsonfile)
-            metadata = data['metadata']
+            metadata = data['export_metadata']
 
             assert 'export_date' in metadata
             assert 'total_records' in metadata

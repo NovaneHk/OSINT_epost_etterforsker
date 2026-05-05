@@ -47,6 +47,9 @@ class TheHarvesterEnhanced(BaseConnector):
 
     def validate_config(self) -> bool:
         """Validate theHarvester configuration"""
+        if not self._is_binary_available():
+            logger.warning("theHarvester binary not found at path '%s'. Will use built-in scraper fallback.", self.tool_path)
+            return False
         try:
             # Check if theHarvester is installed and accessible
             result = subprocess.run(
@@ -66,6 +69,11 @@ class TheHarvesterEnhanced(BaseConnector):
         except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
             logger.error(f"theHarvester validation failed: {e}")
             return False
+
+    def _is_binary_available(self) -> bool:
+        """Return True if the theHarvester binary can be found in PATH."""
+        import shutil
+        return shutil.which(self.tool_path) is not None
 
     def get_capabilities(self) -> List[str]:
         """Return list of supported capabilities"""

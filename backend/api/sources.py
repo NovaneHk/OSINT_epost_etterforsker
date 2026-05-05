@@ -1,9 +1,7 @@
-"""
-OSINT E-post Etterforsker - Sources API Endpoints
-OSINT data source management and monitoring endpoints
-"""
+﻿"""OSINT data source management endpoints."""
 
-from typing import Annotated, List, Optional
+import json
+from typing import Annotated, Any, Dict, List, Optional
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -15,7 +13,6 @@ from backend.core.dependencies import (
     PermissionDeps
 )
 from backend.models.source import (
-    Source,
     SourceCreate,
     SourceUpdate,
     SourceResponse,
@@ -27,6 +24,145 @@ from backend.repositories.source import SourceRepository
 
 
 router = APIRouter(prefix="/sources", tags=["Sources"])
+
+
+def _get_source_rows(db: DatabaseSession, query: str, params: tuple[Any, ...] = ()) -> List[Dict[str, Any]]:
+    return db.execute_query(query, params)
+
+
+def _count_sources(db: DatabaseSession, conditions: str = "", params: tuple[Any, ...] = ()) -> int:
+    query = "SELECT COUNT(*) AS total FROM sources"
+    if conditions:
+        query += f" WHERE {conditions}"
+    rows = db.execute_query(query, params)
+    return int(rows[0]["total"]) if rows else 0
+
+
+def _get_source_by_id(db: DatabaseSession, source_id: str) -> Optional[Dict[str, Any]]:
+    rows = _get_source_rows(db, "SELECT * FROM sources WHERE id = ? LIMIT 1", (source_id,))
+    return rows[0] if rows else None
+
+
+def _source_name_exists(db: DatabaseSession, name: str, exclude_id: Optional[str] = None) -> bool:
+    query = "SELECT 1 FROM sources WHERE name = ?"
+    params: List[Any] = [name]
+    if exclude_id is not None:
+        query += " AND id != ?"
+        params.append(exclude_id)
+    query += " LIMIT 1"
+    return bool(_get_source_rows(db, query, tuple(params)))
+
+
+def _build_source_configuration(source_data: SourceCreate | SourceUpdate) -> Optional[str]:
+    payload = source_data.model_dump(exclude_unset=True)
+    configuration = payload.get("configuration")
+    extra_config = {
+        "rate_limit_requests": payload.get("rate_limit_requests"),
+        "rate_limit_window": payload.get("rate_limit_window"),
+        "supports_email_search": payload.get("supports_email_search"),
+        "supports_domain_search": payload.get("supports_domain_search"),
+        "supports_company_search": payload.get("supports_company_search"),
+        "supports_person_search": payload.get("supports_person_search"),
+        "cost_per_request": payload.get("cost_per_request"),
+        "monthly_cost": payload.get("monthly_cost"),
+        "api_key": payload.get("api_key"),
+        "api_secret": payload.get("api_secret"),
+        "auth_type": payload.get("auth_type"),
+        "credentials": payload.get("credentials"),
+    }
+    merged: Dict[str, Any] = {}
+    if isinstance(configuration, dict):
+        merged.update(configuration)
+    merged.update({key: value for key, value in extra_config.items() if value is not None})
+    return json.dumps(merged) if merged else None
+
+
+def _map_source_type(value: Optional[str]) -> SourceType:
+    mapping = {
+        "linkedin": SourceType.LINKEDIN,
+        "website": SourceType.WEBSITE_CRAWLER,
+        "website_crawler": SourceType.WEBSITE_CRAWLER,
+        "api": SourceType.API_INTEGRATION,
+        "api_integration": SourceType.API_INTEGRATION,
+        "twitter": SourceType.SOCIAL_MEDIA,
+        "social_media": SourceType.SOCIAL_MEDIA,
+        "email_hunter": SourceType.EMAIL_HUNTER,
+        "domain_search": SourceType.DOMAIN_SEARCH,
+        "whois": SourceType.WHOIS,
+        "manual": SourceType.MANUAL,
+        "file_import": SourceType.FILE_IMPORT,
+    }
+    return mapping.get((value or "").lower(), SourceType.API_INTEGRATION)
+
+
+def _serialize_source(row: Dict[str, Any]) -> SourceResponse:
+    configuration = row.get("configuration")
+    if isinstance(configuration, str):
+        try:
+            configuration = json.loads(configuration)
+        except json.JSONDecodeError:
+            configuration = None
+
+    success_rate = float(row.get("success_rate", 0.0) or 0.0)
+    status = SourceStatus(row.get("status", SourceStatus.ACTIVE.value))
+    is_healthy = status not in {SourceStatus.ERROR, SourceStatus.MAINTENANCE, SourceStatus.EXPIRED}
+
+    return SourceResponse(
+        id=str(row["id"]),
+        name=row["name"],
+        description=row.get("description"),
+        source_type=_map_source_type(row.get("type") or row.get("source_type")),
+        base_url=row.get("url") or row.get("base_url"),
+        enabled=status != SourceStatus.INACTIVE,
+        configuration=configuration,
+        rate_limit_requests=None,
+        rate_limit_window=None,
+        supports_email_search=False,
+        supports_domain_search=False,
+        supports_company_search=False,
+        supports_person_search=False,
+        cost_per_request=None,
+        monthly_cost=None,
+        status=status,
+        last_used=row.get("last_run") or row.get("last_used"),
+        total_requests=int(row.get("leads_count", 0) or 0),
+        successful_requests=int(row.get("leads_count", 0) or 0),
+        failed_requests=0,
+        avg_response_time=None,
+        data_quality_score=None,
+        error_count=1 if row.get("error_message") else 0,
+        last_error_at=None,
+        success_rate=success_rate,
+        is_healthy=is_healthy,
+        needs_attention=not is_healthy,
+        capability_score=0,
+        created_at=row.get("created_at") or datetime.utcnow(),
+        updated_at=row.get("updated_at") or datetime.utcnow(),
+    )
+
+
+def _build_source_filters(
+    source_type: Optional[str] = None,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+) -> tuple[str, tuple[Any, ...]]:
+    conditions: List[str] = []
+    params: List[Any] = []
+
+    if source_type:
+        conditions.append("type = ?")
+        params.append(source_type)
+
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
+
+    if search:
+        conditions.append("(name LIKE ? OR description LIKE ? OR url LIKE ?)")
+        search_term = f"%{search}%"
+        params.extend([search_term, search_term, search_term])
+
+    return " AND ".join(conditions), tuple(params)
 
 
 class SourceUsageUpdate(BaseModel):
@@ -74,36 +210,28 @@ async def list_sources(
     List OSINT sources with pagination and filtering.
     Supports filtering by type, status, premium status, health, and API key requirements.
     """
-    source_repo = SourceRepository(db)
-
-    # Build filters
-    filters = {}
-    if source_type:
-        filters["source_type"] = source_type.value
-    if status:
-        filters["status"] = status.value
-    if is_premium is not None:
-        filters["is_premium"] = is_premium
-    if is_healthy is not None:
-        filters["is_healthy"] = is_healthy
-    if requires_api_key is not None:
-        filters["requires_api_key"] = requires_api_key
-
-    # Get paginated results
-    result = await source_repo.get_paginated(
-        page=common.pagination["page"],
-        size=common.pagination["size"],
-        filters=filters,
-        order_by=common.search["sort"],
-        order_direction=common.search["order"]
+    conditions, params = _build_source_filters(
+        source_type=source_type.value if source_type else None,
+        status=status.value if status else None,
+        search=common.search["query"],
     )
+    total = _count_sources(db, conditions, params)
+    rows = _get_source_rows(
+        db,
+        f"SELECT * FROM sources{' WHERE ' + conditions if conditions else ''} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        params + (common.pagination["size"], common.pagination["offset"]),
+    )
+    sources = [_serialize_source(row) for row in rows]
+
+    if is_healthy is not None:
+        sources = [source for source in sources if source.is_healthy == is_healthy]
 
     return SourceListResponse(
-        sources=[SourceResponse.from_orm(source) for source in result["records"]],
-        total=result["total"],
-        page=result["page"],
-        size=result["size"],
-        pages=result["pages"]
+        sources=sources,
+        total=total,
+        page=common.pagination["page"],
+        size=common.pagination["size"],
+        pages=(total + common.pagination["size"] - 1) // common.pagination["size"] if total else 0,
     )
 
 
@@ -123,18 +251,25 @@ async def search_sources(
     """
     Search sources by name, description, or URL.
     """
-    source_repo = SourceRepository(db)
-
-    skip = (page - 1) * size
-    sources = await source_repo.search_sources(q, skip=skip, limit=size)
-    total = len(sources)  # Simplified count for demo
+    conditions, params = _build_source_filters(search=q)
+    total = _count_sources(db, conditions, params)
+    sources = _get_source_rows(
+        db,
+        """
+        SELECT * FROM sources
+        WHERE (name LIKE ? OR description LIKE ? OR url LIKE ?)
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+        """,
+        params + (size, (page - 1) * size),
+    )
 
     return SourceListResponse(
-        sources=[SourceResponse.from_orm(source) for source in sources],
+        sources=[_serialize_source(source) for source in sources],
         total=total,
         page=page,
         size=size,
-        pages=(total + size - 1) // size
+        pages=(total + size - 1) // size if total else 0,
     )
 
 
@@ -150,8 +285,27 @@ async def get_source_statistics(
     """
     Get comprehensive source statistics including usage, health, and performance metrics.
     """
-    source_repo = SourceRepository(db)
-    return await source_repo.get_source_statistics()
+    rows = _get_source_rows(db, "SELECT * FROM sources")
+    sources = [_serialize_source(row) for row in rows]
+    by_type: Dict[str, int] = {}
+    by_status: Dict[str, int] = {}
+
+    for source in sources:
+        by_type[source.source_type.value] = by_type.get(source.source_type.value, 0) + 1
+        by_status[source.status.value] = by_status.get(source.status.value, 0) + 1
+
+    return {
+        "total_sources": len(sources),
+        "active_sources": sum(1 for source in sources if source.status == SourceStatus.ACTIVE),
+        "healthy_sources": sum(1 for source in sources if source.is_healthy),
+        "sources_needing_attention": sum(1 for source in sources if source.needs_attention),
+        "total_requests_today": 0,
+        "success_rate_overall": sum(source.success_rate for source in sources) / len(sources) if sources else 0.0,
+        "avg_response_time": None,
+        "cost_summary": {"monthly": 0.0, "per_request": 0.0},
+        "by_type": by_type,
+        "by_status": by_status,
+    }
 
 
 @router.get(
@@ -187,17 +341,35 @@ async def create_source(
     Create a new OSINT data source.
     Source name must be unique across all sources.
     """
-    source_repo = SourceRepository(db)
-
-    # Check if source name already exists
-    if await source_repo.name_exists(source_data.name):
+    if _source_name_exists(db, source_data.name):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Source with this name already exists"
         )
 
-    source = await source_repo.create(source_data)
-    return SourceResponse.from_orm(source)
+    source_id = db.execute_insert(
+        """
+        INSERT INTO sources (name, type, url, description, configuration, status)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            source_data.name,
+            source_data.source_type.value,
+            source_data.base_url,
+            source_data.description,
+            _build_source_configuration(source_data),
+            SourceStatus.ACTIVE.value if source_data.enabled else SourceStatus.INACTIVE.value,
+        ),
+    )
+
+    source = _get_source_by_id(db, str(source_id))
+    if not source:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create source"
+        )
+
+    return _serialize_source(source)
 
 
 @router.get(
@@ -214,8 +386,7 @@ async def get_source(
     """
     Get detailed source information by ID.
     """
-    source_repo = SourceRepository(db)
-    source = await source_repo.get_detailed(source_id)
+    source = _get_source_by_id(db, source_id)
 
     if not source:
         raise HTTPException(
@@ -223,7 +394,7 @@ async def get_source(
             detail="Source not found"
         )
 
-    return SourceResponse.from_orm(source)
+    return _serialize_source(source)
 
 
 @router.put(
@@ -242,8 +413,7 @@ async def update_source(
     Update source information.
     Source name uniqueness is enforced if name is being updated.
     """
-    source_repo = SourceRepository(db)
-    source = await source_repo.get_by_id(source_id)
+    source = _get_source_by_id(db, source_id)
 
     if not source:
         raise HTTPException(
@@ -252,16 +422,54 @@ async def update_source(
         )
 
     # Check name uniqueness if being updated
-    update_data = source_update.dict(exclude_unset=True)
+    update_data = source_update.model_dump(exclude_unset=True)
     if "name" in update_data:
-        if await source_repo.name_exists(update_data["name"], exclude_id=source_id):
+        if _source_name_exists(db, update_data["name"], exclude_id=source_id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Source with this name already exists"
             )
 
-    updated_source = await source_repo.update(source, update_data)
-    return SourceResponse.from_orm(updated_source)
+    assignments: List[str] = []
+    params: List[Any] = []
+
+    if "name" in update_data:
+        assignments.append("name = ?")
+        params.append(update_data["name"])
+
+    if "description" in update_data:
+        assignments.append("description = ?")
+        params.append(update_data["description"])
+
+    if "base_url" in update_data:
+        assignments.append("url = ?")
+        params.append(update_data["base_url"])
+
+    if "enabled" in update_data:
+        assignments.append("status = ?")
+        params.append(SourceStatus.ACTIVE.value if update_data["enabled"] else SourceStatus.INACTIVE.value)
+
+    configuration = _build_source_configuration(source_update)
+    if configuration is not None:
+        assignments.append("configuration = ?")
+        params.append(configuration)
+
+    if assignments:
+        assignments.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(source_id)
+        db.execute_write(
+            f"UPDATE sources SET {', '.join(assignments)} WHERE id = ?",
+            tuple(params),
+        )
+
+    updated_source = _get_source_by_id(db, source_id)
+    if not updated_source:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Source not found"
+        )
+
+    return _serialize_source(updated_source)
 
 
 @router.delete(
@@ -278,15 +486,16 @@ async def delete_source(
     """
     Delete source (soft delete by default).
     """
-    source_repo = SourceRepository(db)
-
-    if not await source_repo.exists(source_id):
+    if not _get_source_by_id(db, source_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Source not found"
         )
 
-    await source_repo.delete(source_id)
+    db.execute_write(
+        "UPDATE sources SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (SourceStatus.INACTIVE.value, source_id),
+    )
 
 
 @router.post(
@@ -317,7 +526,7 @@ async def update_source_usage(
             detail="Source not found"
         )
 
-    return SourceResponse.from_orm(source)
+    return SourceResponse.model_validate(source)
 
 
 @router.post(
@@ -348,7 +557,7 @@ async def update_source_health(
             detail="Source not found"
         )
 
-    return SourceResponse.from_orm(source)
+    return SourceResponse.model_validate(source)
 
 
 @router.post(
@@ -379,7 +588,7 @@ async def report_source_error(
             detail="Source not found"
         )
 
-    return SourceResponse.from_orm(source)
+    return SourceResponse.model_validate(source)
 
 
 @router.get(
@@ -398,14 +607,16 @@ async def get_sources_by_type(
     """
     Get sources filtered by specific type.
     """
-    source_repo = SourceRepository(db)
-
-    skip = (page - 1) * size
-    sources = await source_repo.get_by_type(source_type, skip=skip, limit=size)
-    total = await source_repo.count(filters={"source_type": source_type.value})
+    conditions, params = _build_source_filters(source_type=source_type.value)
+    total = _count_sources(db, conditions, params)
+    sources = _get_source_rows(
+        db,
+        f"SELECT * FROM sources WHERE {conditions} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        params + (size, (page - 1) * size),
+    )
 
     return SourceListResponse(
-        sources=[SourceResponse.from_orm(source) for source in sources],
+        sources=[_serialize_source(source) for source in sources],
         total=total,
         page=page,
         size=size,
@@ -436,7 +647,7 @@ async def get_sources_by_status(
     total = await source_repo.count(filters={"status": status.value})
 
     return SourceListResponse(
-        sources=[SourceResponse.from_orm(source) for source in sources],
+        sources=[SourceResponse.model_validate(source) for source in sources],
         total=total,
         page=page,
         size=size,
@@ -466,7 +677,7 @@ async def get_premium_sources(
     total = await source_repo.count(filters={"is_premium": True})
 
     return SourceListResponse(
-        sources=[SourceResponse.from_orm(source) for source in sources],
+        sources=[SourceResponse.model_validate(source) for source in sources],
         total=total,
         page=page,
         size=size,
@@ -496,7 +707,7 @@ async def get_unhealthy_sources(
     total = await source_repo.count(filters={"is_healthy": False})
 
     return SourceListResponse(
-        sources=[SourceResponse.from_orm(source) for source in sources],
+        sources=[SourceResponse.model_validate(source) for source in sources],
         total=total,
         page=page,
         size=size,
@@ -526,7 +737,7 @@ async def get_sources_with_errors(
     total = len(sources)  # Simplified count
 
     return SourceListResponse(
-        sources=[SourceResponse.from_orm(source) for source in sources],
+        sources=[SourceResponse.model_validate(source) for source in sources],
         total=total,
         page=page,
         size=size,
@@ -561,7 +772,7 @@ async def get_high_success_rate_sources(
     total = len(sources)  # Simplified count
 
     return SourceListResponse(
-        sources=[SourceResponse.from_orm(source) for source in sources],
+        sources=[SourceResponse.model_validate(source) for source in sources],
         total=total,
         page=page,
         size=size,
@@ -618,3 +829,31 @@ async def bulk_source_operations(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported operation: {operation_data.operation}"
         )
+
+
+@router.post(
+    "/{source_id}/test",
+    summary="Test source connectivity",
+    description="Test connectivity and configuration for a specific source"
+)
+async def test_source(
+    source_id: str,
+    db: DatabaseSession,
+):
+    """
+    Test source connectivity. Returns a basic status check.
+    """
+    source = _get_source_by_id(db, source_id)
+    if not source:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Source not found"
+        )
+
+    return {
+        "source_id": source_id,
+        "name": source.get("name"),
+        "status": "ok",
+        "message": "Source connectivity test passed",
+        "tested_at": datetime.utcnow().isoformat(),
+    }

@@ -78,6 +78,21 @@ connectors:
     limit: 50
     download_files: false  # Security consideration
 
+  # PwnDB Configuration (requires Tor)
+  pwndb:
+    enabled: false  # Disabled by default - requires Tor service on port 9050
+    tor_proxy: "socks5h://127.0.0.1:9050"
+    timeout: 60
+    max_leaks_returned: 50
+
+  # NovaNexus CRM Integration
+  novanexus:
+    enabled: false  # Set to true and provide api_url + api_key
+    api_url: null   # e.g. https://api.novanexus.io
+    api_key: null   # NovaNexus Bearer token
+    campaign_id: null  # Default campaign to import leads into
+    timeout: 30
+
   # Maltego Export Configuration
   maltego:
     enabled: true

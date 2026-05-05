@@ -17,6 +17,7 @@ import inspect
 from core.security import SecurityManager
 from core.performance import PerformanceMonitor
 from core.error_handling import OSINTError, handle_errors
+from integrations.base_connector import BaseConnector, CLIConnector, APIConnector
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,11 @@ class ConnectorManager:
             'hibp_connector',
             'spiderfoot_connector',
             'reconng_connector',
-            'intelowl_connector'
+            'intelowl_connector',
+            # Wave 4
+            'metagoofil_connector',
+            'pwndb_connector',
+            'novanexus_connector',
         ]
 
         for module_name in connector_modules:
@@ -129,39 +134,48 @@ class ConnectorManager:
     def _load_connector(self, module_name: str):
         """Load a specific connector module"""
         try:
+            connector_name = module_name.replace('_connector', '')
+            config = self.connector_configs.get(connector_name, {})
+
+            if not config.get('enabled', False):
+                logger.info(f"Connector {connector_name} is disabled")
+                self.connector_status[connector_name] = ConnectorStatus.INACTIVE
+                return
+
             # Import the connector module
             module = importlib.import_module(f'integrations.{module_name}')
 
             # Find connector class (should inherit from BaseConnector)
             connector_class = None
             for name, obj in inspect.getmembers(module):
-                if (inspect.isclass(obj) and
-                    hasattr(obj, '__bases__') and
-                    any('BaseConnector' in str(base) for base in obj.__bases__)):
+                if (
+                    inspect.isclass(obj)
+                    and obj.__module__ == module.__name__
+                    and issubclass(obj, BaseConnector)
+                    and obj is not BaseConnector
+                    and not inspect.isabstract(obj)
+                ):
                     connector_class = obj
                     break
 
             if connector_class:
-                # Get configuration for this connector
-                connector_name = module_name.replace('_connector', '')
-                config = self.connector_configs.get(connector_name, {})
-
-                if config.get('enabled', False):
-                    # Initialize connector
-                    connector = connector_class(config)
-
-                    # Validate configuration
-                    if connector.validate_config():
-                        self.connectors[connector_name] = connector
-                        self.connector_status[connector_name] = ConnectorStatus.ACTIVE
-                        self.connector_metrics[connector_name] = ConnectorMetrics()
-                        logger.info(f"Loaded connector: {connector_name}")
-                    else:
-                        logger.error(f"Invalid configuration for connector: {connector_name}")
-                        self.connector_status[connector_name] = ConnectorStatus.ERROR
+                # Initialize connector using constructor-compatible arguments.
+                if issubclass(connector_class, CLIConnector):
+                    connector = connector_class(tool_path=config.get('tool_path'), config=config)
+                elif issubclass(connector_class, APIConnector):
+                    connector = connector_class(api_key=config.get('api_key'), config=config)
                 else:
-                    logger.info(f"Connector {connector_name} is disabled")
-                    self.connector_status[connector_name] = ConnectorStatus.INACTIVE
+                    connector = connector_class(config=config)
+
+                # Validate configuration
+                if connector.validate_config():
+                    self.connectors[connector_name] = connector
+                    self.connector_status[connector_name] = ConnectorStatus.ACTIVE
+                    self.connector_metrics[connector_name] = ConnectorMetrics()
+                    logger.info(f"Loaded connector: {connector_name}")
+                else:
+                    logger.error(f"Invalid configuration for connector: {connector_name}")
+                    self.connector_status[connector_name] = ConnectorStatus.ERROR
             else:
                 logger.error(f"No valid connector class found in {module_name}")
 

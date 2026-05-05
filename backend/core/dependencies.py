@@ -1,27 +1,83 @@
-"""
-OSINT E-post Etterforsker - FastAPI Dependencies
-Authentication, authorization, and common dependencies
-"""
+"""Common FastAPI dependencies and auth helpers."""
 
+from dataclasses import dataclass
+import collections
+import time
+import logging
 from typing import Annotated, Optional
-from fastapi import Depends, HTTPException, status, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.core.database import get_db_session, MockAsyncSession
-from backend.core.security import jwt_manager, permission_manager, TokenData
-from backend.models.user_simple import User
-# Mock repository for compatibility
-class MockUserRepository:
-    def __init__(self, db):
-        self.db = db
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-    async def get_by_id(self, user_id):
-        return User(id=user_id, email="admin@example.com", role="ADMIN", is_active=True)
+from backend.core.database import DatabaseManager, get_db_session
+from backend.core.security import jwt_manager, permission_manager
+
+try:
+    from core.performance import PerformanceMonitor
+except ImportError:
+    class PerformanceMonitor:
+        def start_timer(self, name): return None
+        def end_timer(self, timer_id): pass
+        def stop_timer(self, timer_id, category='operation'): return 0.0
+        def record_metric(self, name, value, unit, category, metadata=None): pass
+        def get_metrics(self): return {}
+
+# Initialize performance monitor
+performance_monitor = PerformanceMonitor()
+
+logger = logging.getLogger(__name__)
+
+class UserRoleValue:
+    """Small compatibility wrapper exposing `.value` like an enum."""
+
+    def __init__(self, value: str):
+        self.value = (value or "viewer").upper()
 
 
-# Security scheme for Bearer token
-security = HTTPBearer()
+@dataclass
+class AuthenticatedUser:
+    id: str
+    email: str
+    username: Optional[str]
+    full_name: str
+    role: UserRoleValue
+    is_active: bool
+    is_verified: bool
+    hashed_password: Optional[str]
+    status: str
+    last_login_at: Optional[str]
+    login_count: int
+
+    @property
+    def password_hash(self) -> Optional[str]:
+        return self.hashed_password
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role.value == "ADMIN"
+
+    @property
+    def is_manager(self) -> bool:
+        return self.role.value in {"ADMIN", "MANAGER"}
+
+
+def _map_user_row(row: dict) -> AuthenticatedUser:
+    return AuthenticatedUser(
+        id=str(row["id"]),
+        email=row["email"],
+        username=row.get("username"),
+        full_name=row.get("full_name") or row.get("username") or row["email"],
+        role=UserRoleValue(row.get("role", "viewer")),
+        is_active=bool(row.get("is_active", 1)),
+        is_verified=bool(row.get("is_verified", 0)),
+        hashed_password=row.get("hashed_password"),
+        status=row.get("status", "active"),
+        last_login_at=row.get("last_login") or row.get("last_login_at"),
+        login_count=int(row.get("login_count", 0) or 0),
+    )
+
+
+security = HTTPBearer(auto_error=False)
 
 
 class AuthenticationError(HTTPException):
@@ -44,19 +100,69 @@ class AuthorizationError(HTTPException):
 
 
 async def get_current_user_from_token(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
-    db: Annotated[MockAsyncSession, Depends(get_db_session)]
-) -> User:
+    credentials: Annotated[Optional[HTTPAuthorizationCredentials], Depends(security)],
+    db: Annotated[DatabaseManager, Depends(get_db_session)]
+) -> AuthenticatedUser:
     """
-    Extract current user from JWT token - Mock implementation
+    Extract current user from JWT token
     """
-    # For testing, return a mock admin user
-    return User(id="1", email="admin@example.com", role="ADMIN", is_active=True)
+    # Start timer for performance monitoring
+    timer_id = performance_monitor.start_timer("auth_token_verification")
+
+    try:
+        if credentials is None:
+            raise AuthenticationError("Missing authentication token")
+
+        token = credentials.credentials
+        # Validate token and get token data
+        token_data = jwt_manager.decode_token(token)
+
+        rows = db.execute_query(
+            """
+            SELECT id, email, username, full_name, role, is_active,
+                   is_verified, hashed_password, last_login, login_count
+            FROM users
+            WHERE id = ?
+            LIMIT 1
+            """,
+            (token_data.sub,)
+        )
+        user = _map_user_row(rows[0]) if rows else None
+
+        if not user:
+            logger.warning(f"User not found for token subject: {token_data.sub}")
+            raise AuthenticationError("User not found")
+
+        # Record authentication success in metrics
+        performance_monitor.record_metric(
+            "auth_success",
+            1.0,
+            "count",
+            "auth",
+            {"user_id": str(user.id), "role": user.role}
+        )
+
+        return user
+
+    except Exception as e:
+        # Record authentication failure in metrics
+        performance_monitor.record_metric(
+            "auth_failure",
+            1.0,
+            "count",
+            "auth",
+            {"error": str(e)}
+        )
+        logger.error(f"Authentication error: {str(e)}")
+        raise AuthenticationError("Invalid authentication credentials")
+    finally:
+        # Stop timer
+        performance_monitor.stop_timer(timer_id, "auth")
 
 
 async def get_current_active_user(
-    current_user: Annotated[User, Depends(get_current_user_from_token)]
-) -> User:
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user_from_token)]
+) -> AuthenticatedUser:
     """
     Get current active user
     """
@@ -71,8 +177,8 @@ def require_permissions(*required_permissions: str):
     Dependency factory to require specific permissions
     """
     async def permission_checker(
-        current_user: Annotated[User, Depends(get_current_active_user)]
-    ) -> User:
+        current_user: Annotated[AuthenticatedUser, Depends(get_current_active_user)]
+    ) -> AuthenticatedUser:
         user_permissions = permission_manager.get_role_permissions(current_user.role.value)
 
         for permission in required_permissions:
@@ -95,8 +201,8 @@ def require_role(required_role: str):
     Dependency factory to require minimum role level
     """
     async def role_checker(
-        current_user: Annotated[User, Depends(get_current_active_user)]
-    ) -> User:
+        current_user: Annotated[AuthenticatedUser, Depends(get_current_active_user)]
+    ) -> AuthenticatedUser:
         if not permission_manager.has_role_level(current_user.role.value, required_role):
             raise AuthorizationError(
                 f"Role required: {required_role} or higher"
@@ -112,9 +218,9 @@ def require_resource_access(resource_permission: str, get_resource_owner_id=None
     Dependency factory to check resource-specific access
     """
     async def resource_access_checker(
-        current_user: Annotated[User, Depends(get_current_active_user)],
+        current_user: Annotated[AuthenticatedUser, Depends(get_current_active_user)],
         request: Request
-    ) -> User:
+    ) -> AuthenticatedUser:
         user_permissions = permission_manager.get_role_permissions(current_user.role.value)
 
         # Get resource owner ID if function provided
@@ -140,13 +246,13 @@ def require_resource_access(resource_permission: str, get_resource_owner_id=None
 
 
 # Common dependency aliases
-CurrentUser = Annotated[User, Depends(get_current_active_user)]
-DatabaseSession = Annotated[MockAsyncSession, Depends(get_db_session)]
+CurrentUser = Annotated[AuthenticatedUser, Depends(get_current_active_user)]
+DatabaseSession = Annotated[DatabaseManager, Depends(get_db_session)]
 
 # Role-based dependencies
-AdminUser = Annotated[User, Depends(require_role("ADMIN"))]
-ManagerUser = Annotated[User, Depends(require_role("MANAGER"))]
-AnalystUser = Annotated[User, Depends(require_role("ANALYST"))]
+AdminUser = Annotated[AuthenticatedUser, Depends(require_role("ADMIN"))]
+ManagerUser = Annotated[AuthenticatedUser, Depends(require_role("MANAGER"))]
+AnalystUser = Annotated[AuthenticatedUser, Depends(require_role("ANALYST"))]
 
 
 # Permission-based dependencies
@@ -154,58 +260,58 @@ class PermissionDeps:
     """Permission-based dependency collection"""
 
     # Lead permissions
-    ReadLeads = Annotated[User, Depends(require_permissions("read:leads"))]
-    CreateLeads = Annotated[User, Depends(require_permissions("create:leads"))]
-    UpdateLeads = Annotated[User, Depends(require_permissions("update:leads"))]
-    DeleteLeads = Annotated[User, Depends(require_permissions("delete:leads"))]
+    ReadLeads = Annotated[AuthenticatedUser, Depends(require_permissions("read:leads"))]
+    CreateLeads = Annotated[AuthenticatedUser, Depends(require_permissions("create:leads"))]
+    UpdateLeads = Annotated[AuthenticatedUser, Depends(require_permissions("update:leads"))]
+    DeleteLeads = Annotated[AuthenticatedUser, Depends(require_permissions("delete:leads"))]
 
     # Source permissions
-    ReadSources = Annotated[User, Depends(require_permissions("read:sources"))]
-    CreateSources = Annotated[User, Depends(require_permissions("create:sources"))]
-    UpdateSources = Annotated[User, Depends(require_permissions("update:sources"))]
-    DeleteSources = Annotated[User, Depends(require_permissions("delete:sources"))]
+    ReadSources = Annotated[AuthenticatedUser, Depends(require_permissions("read:sources"))]
+    CreateSources = Annotated[AuthenticatedUser, Depends(require_permissions("create:sources"))]
+    UpdateSources = Annotated[AuthenticatedUser, Depends(require_permissions("update:sources"))]
+    DeleteSources = Annotated[AuthenticatedUser, Depends(require_permissions("delete:sources"))]
 
     # Campaign permissions
-    ReadCampaigns = Annotated[User, Depends(require_permissions("read:campaigns"))]
-    CreateCampaigns = Annotated[User, Depends(require_permissions("create:campaigns"))]
-    UpdateCampaigns = Annotated[User, Depends(require_permissions("update:campaigns"))]
-    DeleteCampaigns = Annotated[User, Depends(require_permissions("delete:campaigns"))]
+    ReadCampaigns = Annotated[AuthenticatedUser, Depends(require_permissions("read:campaigns"))]
+    CreateCampaigns = Annotated[AuthenticatedUser, Depends(require_permissions("create:campaigns"))]
+    UpdateCampaigns = Annotated[AuthenticatedUser, Depends(require_permissions("update:campaigns"))]
+    DeleteCampaigns = Annotated[AuthenticatedUser, Depends(require_permissions("delete:campaigns"))]
 
     # Export permissions
-    ReadExports = Annotated[User, Depends(require_permissions("read:exports"))]
-    CreateExports = Annotated[User, Depends(require_permissions("create:exports"))]
-    UpdateExports = Annotated[User, Depends(require_permissions("update:exports"))]
-    DeleteExports = Annotated[User, Depends(require_permissions("delete:exports"))]
+    ReadExports = Annotated[AuthenticatedUser, Depends(require_permissions("read:exports"))]
+    CreateExports = Annotated[AuthenticatedUser, Depends(require_permissions("create:exports"))]
+    UpdateExports = Annotated[AuthenticatedUser, Depends(require_permissions("update:exports"))]
+    DeleteExports = Annotated[AuthenticatedUser, Depends(require_permissions("delete:exports"))]
 
     # Search run permissions
-    ReadRuns = Annotated[User, Depends(require_permissions("read:runs"))]
-    CreateRuns = Annotated[User, Depends(require_permissions("create:runs"))]
-    UpdateRuns = Annotated[User, Depends(require_permissions("update:runs"))]
-    DeleteRuns = Annotated[User, Depends(require_permissions("delete:runs"))]
+    ReadRuns = Annotated[AuthenticatedUser, Depends(require_permissions("read:runs"))]
+    CreateRuns = Annotated[AuthenticatedUser, Depends(require_permissions("create:runs"))]
+    UpdateRuns = Annotated[AuthenticatedUser, Depends(require_permissions("update:runs"))]
+    DeleteRuns = Annotated[AuthenticatedUser, Depends(require_permissions("delete:runs"))]
 
     # Search result permissions
-    ReadSearchResults = Annotated[User, Depends(require_permissions("read:search_results"))]
-    CreateSearchResults = Annotated[User, Depends(require_permissions("create:search_results"))]
-    UpdateSearchResults = Annotated[User, Depends(require_permissions("update:search_results"))]
-    DeleteSearchResults = Annotated[User, Depends(require_permissions("delete:search_results"))]
+    ReadSearchResults = Annotated[AuthenticatedUser, Depends(require_permissions("read:search_results"))]
+    CreateSearchResults = Annotated[AuthenticatedUser, Depends(require_permissions("create:search_results"))]
+    UpdateSearchResults = Annotated[AuthenticatedUser, Depends(require_permissions("update:search_results"))]
+    DeleteSearchResults = Annotated[AuthenticatedUser, Depends(require_permissions("delete:search_results"))]
 
     # User management permissions
-    CreateUsers = Annotated[User, Depends(require_permissions("create:users"))]
-    UpdateUsers = Annotated[User, Depends(require_permissions("update:users"))]
-    DeleteUsers = Annotated[User, Depends(require_permissions("delete:users"))]
+    CreateUsers = Annotated[AuthenticatedUser, Depends(require_permissions("create:users"))]
+    UpdateUsers = Annotated[AuthenticatedUser, Depends(require_permissions("update:users"))]
+    DeleteUsers = Annotated[AuthenticatedUser, Depends(require_permissions("delete:users"))]
 
     # System permissions
-    SystemAdmin = Annotated[User, Depends(require_permissions("system:administration"))]
-    SystemMonitoring = Annotated[User, Depends(require_permissions("system:monitoring"))]
+    SystemAdmin = Annotated[AuthenticatedUser, Depends(require_permissions("system:administration"))]
+    SystemMonitoring = Annotated[AuthenticatedUser, Depends(require_permissions("system:monitoring"))]
 
     # OSINT operations
-    ExecuteOSINT = Annotated[User, Depends(require_permissions("execute:osint_searches"))]
+    ExecuteOSINT = Annotated[AuthenticatedUser, Depends(require_permissions("execute:osint_searches"))]
 
 
 async def get_optional_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-    db: Annotated[AsyncSession, Depends(get_db_session)] = None
-) -> Optional[User]:
+    db: Annotated[DatabaseManager, Depends(get_db_session)] = None
+) -> Optional[AuthenticatedUser]:
     """
     Get current user if token is provided, otherwise return None
     Useful for endpoints that work for both authenticated and anonymous users
@@ -301,15 +407,34 @@ async def get_request_id(request: Request) -> str:
     return getattr(request.state, "request_id", "unknown")
 
 
+# In-memory sliding-window rate limit store: {user_id: [timestamp, ...]}
+_rate_limit_store: dict = collections.defaultdict(list)
+_RATE_LIMIT_WINDOW = 60   # seconds
+_RATE_LIMIT_MAX = 100     # requests per window
+
+
 async def rate_limit_check(request: Request, current_user: CurrentUser) -> None:
-    """
-    Check rate limits for the current user/endpoint
-    This is a placeholder - implement actual rate limiting logic
-    """
-    # TODO: Implement Redis-based rate limiting
-    # For now, just pass through
-    pass
+    """In-memory sliding-window rate limit (100 req / 60 s per user)."""
+    key = str(current_user.id)
+    now = time.monotonic()
+    window_start = now - _RATE_LIMIT_WINDOW
+    timestamps = _rate_limit_store[key]
+    # Purge timestamps outside the window
+    _rate_limit_store[key] = [t for t in timestamps if t > window_start]
+    if len(_rate_limit_store[key]) >= _RATE_LIMIT_MAX:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded. Please slow down your requests.",
+        )
+    _rate_limit_store[key].append(now)
 
 
 # Request context dependency
 RequestId = Annotated[str, Depends(get_request_id)]
+
+
+def get_metrics():
+    """
+    Get system performance metrics
+    """
+    return performance_monitor.get_metrics()

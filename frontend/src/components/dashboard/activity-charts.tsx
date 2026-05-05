@@ -72,13 +72,13 @@ export function ActivityCharts() {
 
             <TabsContent value="leads" className="mt-4">
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={activity.leads_timeline}>
+                <LineChart data={activity.data?.leads_timeline || []}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis
                     dataKey="date"
                     tickFormatter={(value) => formatDate(new Date(value), 'short')}
                   />
-                  <YAxis tickFormatter={formatNumber} />
+                  <YAxis tickFormatter={(value) => formatNumber(value)} />
                   <Tooltip
                     labelFormatter={(label) => formatDate(new Date(label), 'long')}
                     formatter={(value: number) => [formatNumber(value), 'Leads']}
@@ -96,13 +96,13 @@ export function ActivityCharts() {
 
             <TabsContent value="runs" className="mt-4">
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={activity.runs_timeline}>
+                <BarChart data={activity.data?.runs_timeline || []}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis
                     dataKey="date"
                     tickFormatter={(value) => formatDate(new Date(value), 'short')}
                   />
-                  <YAxis tickFormatter={formatNumber} />
+                  <YAxis tickFormatter={(value) => formatNumber(value)} />
                   <Tooltip
                     labelFormatter={(label) => formatDate(new Date(label), 'long')}
                     formatter={(value: number) => [formatNumber(value), 'Kjøringer']}
@@ -114,13 +114,13 @@ export function ActivityCharts() {
 
             <TabsContent value="exports" className="mt-4">
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={activity.exports_timeline}>
+                <LineChart data={activity.data?.exports_timeline || []}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis
                     dataKey="date"
                     tickFormatter={(value) => formatDate(new Date(value), 'short')}
                   />
-                  <YAxis tickFormatter={formatNumber} />
+                  <YAxis tickFormatter={(value) => formatNumber(value)} />
                   <Tooltip
                     labelFormatter={(label) => formatDate(new Date(label), 'long')}
                     formatter={(value: number) => [formatNumber(value), 'Eksporter']}
@@ -150,7 +150,7 @@ export function ActivityCharts() {
           <ResponsiveContainer width="100%" height={300}>
             <PieChart>
               <Pie
-                data={activity.sources_distribution}
+                data={activity.data?.sources_distribution || []}
                 cx="50%"
                 cy="50%"
                 innerRadius={60}
@@ -159,7 +159,7 @@ export function ActivityCharts() {
                 dataKey="count"
                 label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
               >
-                {activity.sources_distribution.map((entry, index) => (
+                {(activity.data?.sources_distribution || []).map((entry, index) => (
                   <Cell
                     key={`cell-${index}`}
                     fill={getSourceColor(entry.name)}
@@ -182,7 +182,7 @@ export function ActivityCharts() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {activity.recent_activity.map((item, index) => (
+            {(activity.data?.recent_activity || []).map((item, index) => (
               <div key={index} className="flex items-center space-x-4">
                 <div className={`w-2 h-2 rounded-full ${getActivityColor(item.type)}`} />
                 <div className="flex-1 space-y-1">
@@ -194,7 +194,7 @@ export function ActivityCharts() {
                   </p>
                 </div>
                 <div className="text-sm text-muted-foreground">
-                  {item.count && formatNumber(item.count)}
+                  {item.details}
                 </div>
               </div>
             ))}
@@ -211,7 +211,7 @@ export function ActivityCharts() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {activity.top_domains.map((domain, index) => (
+            {(activity.data?.top_domains || []).map((domain, index) => (
               <div key={index} className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   <div className="text-sm font-medium">{domain.domain}</div>

@@ -1,9 +1,7 @@
-"""
-OSINT E-post Etterforsker - Campaigns API Endpoints
-Campaign management and lifecycle operations endpoints
-"""
+"""Campaign management endpoints."""
 
-from typing import Annotated, List, Optional
+import json
+from typing import Annotated, Any, Dict, List, Optional
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -15,7 +13,6 @@ from backend.core.dependencies import (
     PermissionDeps
 )
 from backend.models.campaign import (
-    Campaign,
     CampaignCreate,
     CampaignUpdate,
     CampaignResponse,
@@ -26,6 +23,94 @@ from backend.repositories.campaign import CampaignRepository
 
 
 router = APIRouter(prefix="/campaigns", tags=["Campaigns"])
+
+
+def _get_campaign_rows(db: DatabaseSession, query: str, params: tuple[Any, ...] = ()) -> List[Dict[str, Any]]:
+    return db.execute_query(query, params)
+
+
+def _count_campaigns(db: DatabaseSession, conditions: str = "", params: tuple[Any, ...] = ()) -> int:
+    query = "SELECT COUNT(*) AS total FROM campaigns"
+    if conditions:
+        query += f" WHERE {conditions}"
+    rows = db.execute_query(query, params)
+    return int(rows[0]["total"]) if rows else 0
+
+
+def _get_campaign_by_id(db: DatabaseSession, campaign_id: str) -> Optional[Dict[str, Any]]:
+    rows = _get_campaign_rows(db, "SELECT * FROM campaigns WHERE id = ? LIMIT 1", (campaign_id,))
+    return rows[0] if rows else None
+
+
+def _campaign_name_exists(db: DatabaseSession, name: str, exclude_id: Optional[str] = None) -> bool:
+    query = "SELECT 1 FROM campaigns WHERE name = ?"
+    params: List[Any] = [name]
+    if exclude_id is not None:
+        query += " AND id != ?"
+        params.append(exclude_id)
+    query += " LIMIT 1"
+    return bool(_get_campaign_rows(db, query, tuple(params)))
+
+
+def _set_campaign_status(db: DatabaseSession, campaign_id: str, status: CampaignStatus) -> Optional[Dict[str, Any]]:
+    existing = _get_campaign_by_id(db, campaign_id)
+    if not existing:
+        return None
+
+    assignments = ["status = ?", "updated_at = CURRENT_TIMESTAMP"]
+    params: List[Any] = [status.value]
+
+    params.append(campaign_id)
+    db.execute_write(f"UPDATE campaigns SET {', '.join(assignments)} WHERE id = ?", tuple(params))
+    return _get_campaign_by_id(db, campaign_id)
+
+
+def _serialize_campaign(row: Dict[str, Any]) -> CampaignResponse:
+    target_filters = row.get("filter_criteria") or row.get("target_filters")
+    if isinstance(target_filters, str):
+        try:
+            target_filters = json.loads(target_filters)
+        except json.JSONDecodeError:
+            target_filters = None
+
+    return CampaignResponse(
+        id=str(row["id"]),
+        name=row["name"],
+        description=row.get("description"),
+        target_filters=target_filters,
+        target_leads=row.get("target_count") or row.get("target_leads"),
+        target_sources=None,
+        status=CampaignStatus(row.get("status", CampaignStatus.DRAFT.value)),
+        started_at=row.get("started_at"),
+        ended_at=row.get("ended_at"),
+        created_by=str(row.get("created_by") or "system"),
+        created_at=row.get("created_at") or datetime.utcnow(),
+        updated_at=row.get("updated_at") or datetime.utcnow(),
+    )
+
+
+def _build_campaign_filters(
+    status: Optional[str] = None,
+    created_by: Optional[str] = None,
+    search: Optional[str] = None,
+) -> tuple[str, tuple[Any, ...]]:
+    conditions: List[str] = []
+    params: List[Any] = []
+
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
+
+    if created_by:
+        conditions.append("created_by = ?")
+        params.append(created_by)
+
+    if search:
+        conditions.append("(name LIKE ? OR description LIKE ?)")
+        search_term = f"%{search}%"
+        params.extend([search_term, search_term])
+
+    return " AND ".join(conditions), tuple(params)
 
 
 class CampaignStatusUpdate(BaseModel):
@@ -59,39 +144,36 @@ async def list_campaigns(
     List campaigns with pagination and filtering.
     Supports filtering by status, creator, and date range.
     """
-    campaign_repo = CampaignRepository(db)
-
-    # Build filters
-    filters = {}
-    if status:
-        filters["status"] = status.value
-    if created_by:
-        filters["created_by"] = created_by
-
-    # Handle date range filtering
-    if date_from or date_to:
-        date_filter = {}
-        if date_from:
-            date_filter["gte"] = date_from
-        if date_to:
-            date_filter["lte"] = date_to
-        filters["created_at"] = date_filter
-
-    # Get paginated results
-    result = await campaign_repo.get_paginated(
-        page=common.pagination["page"],
-        size=common.pagination["size"],
-        filters=filters,
-        order_by=common.search["sort"],
-        order_direction=common.search["order"]
+    conditions, params = _build_campaign_filters(
+        status=status.value if status else None,
+        created_by=created_by,
+        search=common.search["query"],
     )
+    total = _count_campaigns(db, conditions, params)
+    campaigns = _get_campaign_rows(
+        db,
+        f"SELECT * FROM campaigns{' WHERE ' + conditions if conditions else ''} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        params + (common.pagination["size"], common.pagination["offset"]),
+    )
+    serialized_campaigns = [_serialize_campaign(campaign) for campaign in campaigns]
+
+    if date_from:
+        serialized_campaigns = [
+            campaign for campaign in serialized_campaigns
+            if campaign.created_at and campaign.created_at >= date_from
+        ]
+    if date_to:
+        serialized_campaigns = [
+            campaign for campaign in serialized_campaigns
+            if campaign.created_at and campaign.created_at <= date_to
+        ]
 
     return CampaignListResponse(
-        campaigns=[CampaignResponse.from_orm(campaign) for campaign in result["records"]],
-        total=result["total"],
-        page=result["page"],
-        size=result["size"],
-        pages=result["pages"]
+        campaigns=serialized_campaigns,
+        total=total,
+        page=common.pagination["page"],
+        size=common.pagination["size"],
+        pages=(total + common.pagination["size"] - 1) // common.pagination["size"] if total else 0,
     )
 
 
@@ -111,18 +193,25 @@ async def search_campaigns(
     """
     Search campaigns by name or description.
     """
-    campaign_repo = CampaignRepository(db)
-
-    skip = (page - 1) * size
-    campaigns = await campaign_repo.search_campaigns(q, skip=skip, limit=size)
-    total = len(campaigns)  # Simplified count for demo
+    conditions, params = _build_campaign_filters(search=q)
+    total = _count_campaigns(db, conditions, params)
+    campaigns = _get_campaign_rows(
+        db,
+        """
+        SELECT * FROM campaigns
+        WHERE (name LIKE ? OR description LIKE ?)
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+        """,
+        params + (size, (page - 1) * size),
+    )
 
     return CampaignListResponse(
-        campaigns=[CampaignResponse.from_orm(campaign) for campaign in campaigns],
+        campaigns=[_serialize_campaign(campaign) for campaign in campaigns],
         total=total,
         page=page,
         size=size,
-        pages=(total + size - 1) // size
+        pages=(total + size - 1) // size if total else 0,
     )
 
 
@@ -139,8 +228,22 @@ async def get_campaign_statistics(
     Get comprehensive campaign statistics including counts by status,
     performance metrics, and user activity.
     """
-    campaign_repo = CampaignRepository(db)
-    return await campaign_repo.get_campaign_statistics()
+    campaigns = [_serialize_campaign(row) for row in _get_campaign_rows(db, "SELECT * FROM campaigns")]
+    campaigns_by_status: Dict[str, int] = {}
+    for campaign in campaigns:
+        campaigns_by_status[campaign.status.value] = campaigns_by_status.get(campaign.status.value, 0) + 1
+
+    total_leads_generated = sum(int(row.get("leads_count", 0) or 0) for row in _get_campaign_rows(db, "SELECT leads_count FROM campaigns"))
+
+    return {
+        "total_campaigns": len(campaigns),
+        "active_campaigns": sum(1 for campaign in campaigns if campaign.status == CampaignStatus.ACTIVE),
+        "campaigns_by_status": campaigns_by_status,
+        "campaigns_by_type": {},
+        "total_leads_generated": total_leads_generated,
+        "avg_leads_per_campaign": total_leads_generated / len(campaigns) if campaigns else 0.0,
+        "success_rate": None,
+    }
 
 
 @router.get(
@@ -156,8 +259,16 @@ async def get_campaigns_by_creator_stats(
     """
     Get campaign creation statistics by user for analytics.
     """
-    campaign_repo = CampaignRepository(db)
-    return await campaign_repo.get_campaigns_by_creator_stats(limit=limit)
+    campaigns = [_serialize_campaign(row) for row in _get_campaign_rows(db, "SELECT * FROM campaigns ORDER BY created_at DESC")]
+    creator_counts: Dict[str, int] = {}
+    for campaign in campaigns:
+        creator_counts[campaign.created_by] = creator_counts.get(campaign.created_by, 0) + 1
+
+    top_creators = sorted(creator_counts.items(), key=lambda item: item[1], reverse=True)[:limit]
+    return [
+        {"created_by": created_by, "campaign_count": count}
+        for created_by, count in top_creators
+    ]
 
 
 @router.post(
@@ -176,21 +287,85 @@ async def create_campaign(
     Create a new campaign for organizing OSINT investigations.
     Campaign name must be unique for the user.
     """
-    campaign_repo = CampaignRepository(db)
-
-    # Check if campaign name already exists for this user
-    if await campaign_repo.name_exists(campaign_data.name):
+    if _campaign_name_exists(db, campaign_data.name):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Campaign with this name already exists"
         )
 
-    # Set the creator
-    campaign_data_dict = campaign_data.dict()
-    campaign_data_dict["created_by"] = current_user.id
+    campaign_id = db.execute_insert(
+        """
+        INSERT INTO campaigns (name, description, filter_criteria, status, target_count)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            campaign_data.name,
+            campaign_data.description,
+            json.dumps(campaign_data.target_filters) if campaign_data.target_filters is not None else None,
+            CampaignStatus.DRAFT.value,
+            campaign_data.target_leads,
+        ),
+    )
+    campaign = _get_campaign_by_id(db, str(campaign_id))
+    if not campaign:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create campaign")
+    return _serialize_campaign(campaign)
 
-    campaign = await campaign_repo.create(campaign_data_dict)
-    return CampaignResponse.from_orm(campaign)
+
+@router.get(
+    "/running",
+    response_model=CampaignListResponse,
+    summary="Get running campaigns",
+    description="Get campaigns that are currently running"
+)
+async def list_running_campaigns(
+    db: DatabaseSession,
+    current_user: PermissionDeps.ReadCampaigns,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size")
+):
+    total = _count_campaigns(db, "status = ?", (CampaignStatus.ACTIVE.value,))
+    campaigns = _get_campaign_rows(
+        db,
+        "SELECT * FROM campaigns WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        (CampaignStatus.ACTIVE.value, size, (page - 1) * size),
+    )
+
+    return CampaignListResponse(
+        campaigns=[_serialize_campaign(campaign) for campaign in campaigns],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1) // size if total else 0,
+    )
+
+
+@router.get(
+    "/overdue",
+    response_model=CampaignListResponse,
+    summary="Get overdue campaigns",
+    description="Get campaigns that should have been completed"
+)
+async def list_overdue_campaigns(
+    db: DatabaseSession,
+    current_user: PermissionDeps.ReadCampaigns,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(20, ge=1, le=100, description="Page size")
+):
+    campaigns = _get_campaign_rows(
+        db,
+        "SELECT * FROM campaigns WHERE status = ? ORDER BY created_at ASC LIMIT ? OFFSET ?",
+        (CampaignStatus.ACTIVE.value, size, (page - 1) * size),
+    )
+    total = _count_campaigns(db, "status = ?", (CampaignStatus.ACTIVE.value,))
+
+    return CampaignListResponse(
+        campaigns=[_serialize_campaign(campaign) for campaign in campaigns],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1) // size if total else 0,
+    )
 
 
 @router.get(
@@ -207,8 +382,7 @@ async def get_campaign(
     """
     Get detailed campaign information by ID.
     """
-    campaign_repo = CampaignRepository(db)
-    campaign = await campaign_repo.get_detailed(campaign_id)
+    campaign = _get_campaign_by_id(db, campaign_id)
 
     if not campaign:
         raise HTTPException(
@@ -216,7 +390,7 @@ async def get_campaign(
             detail="Campaign not found"
         )
 
-    return CampaignResponse.from_orm(campaign)
+    return _serialize_campaign(campaign)
 
 
 @router.put(
@@ -235,8 +409,7 @@ async def update_campaign(
     Update campaign information.
     Campaign name uniqueness is enforced if name is being updated.
     """
-    campaign_repo = CampaignRepository(db)
-    campaign = await campaign_repo.get_by_id(campaign_id)
+    campaign = _get_campaign_by_id(db, campaign_id)
 
     if not campaign:
         raise HTTPException(
@@ -245,16 +418,42 @@ async def update_campaign(
         )
 
     # Check name uniqueness if being updated
-    update_data = campaign_update.dict(exclude_unset=True)
+    update_data = campaign_update.model_dump(exclude_unset=True)
     if "name" in update_data:
-        if await campaign_repo.name_exists(update_data["name"], exclude_id=campaign_id):
+        if _campaign_name_exists(db, update_data["name"], exclude_id=campaign_id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Campaign with this name already exists"
             )
 
-    updated_campaign = await campaign_repo.update(campaign, update_data)
-    return CampaignResponse.from_orm(updated_campaign)
+    assignments: List[str] = []
+    params: List[Any] = []
+
+    if "name" in update_data:
+        assignments.append("name = ?")
+        params.append(update_data["name"])
+    if "description" in update_data:
+        assignments.append("description = ?")
+        params.append(update_data["description"])
+    if "target_filters" in update_data:
+        assignments.append("filter_criteria = ?")
+        params.append(json.dumps(update_data["target_filters"]) if update_data["target_filters"] is not None else None)
+    if "target_leads" in update_data:
+        assignments.append("target_count = ?")
+        params.append(update_data["target_leads"])
+    if "status" in update_data:
+        assignments.append("status = ?")
+        params.append(update_data["status"].value if isinstance(update_data["status"], CampaignStatus) else update_data["status"])
+
+    if assignments:
+        assignments.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(campaign_id)
+        db.execute_write(f"UPDATE campaigns SET {', '.join(assignments)} WHERE id = ?", tuple(params))
+
+    updated_campaign = _get_campaign_by_id(db, campaign_id)
+    if not updated_campaign:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Campaign not found")
+    return _serialize_campaign(updated_campaign)
 
 
 @router.delete(
@@ -271,15 +470,16 @@ async def delete_campaign(
     """
     Delete campaign (soft delete by default).
     """
-    campaign_repo = CampaignRepository(db)
-
-    if not await campaign_repo.exists(campaign_id):
+    if not _get_campaign_by_id(db, campaign_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Campaign not found"
         )
 
-    await campaign_repo.delete(campaign_id)
+    db.execute_write(
+        "UPDATE campaigns SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (CampaignStatus.ARCHIVED.value, campaign_id),
+    )
 
 
 @router.post(
@@ -296,8 +496,7 @@ async def start_campaign(
     """
     Start a campaign that is currently in draft status.
     """
-    campaign_repo = CampaignRepository(db)
-    campaign = await campaign_repo.start_campaign(campaign_id)
+    campaign = _set_campaign_status(db, campaign_id, CampaignStatus.ACTIVE)
 
     if not campaign:
         raise HTTPException(
@@ -305,7 +504,7 @@ async def start_campaign(
             detail="Campaign not found or cannot be started"
         )
 
-    return CampaignResponse.from_orm(campaign)
+    return _serialize_campaign(campaign)
 
 
 @router.post(
@@ -322,8 +521,7 @@ async def pause_campaign(
     """
     Pause an active campaign.
     """
-    campaign_repo = CampaignRepository(db)
-    campaign = await campaign_repo.pause_campaign(campaign_id)
+    campaign = _set_campaign_status(db, campaign_id, CampaignStatus.PAUSED)
 
     if not campaign:
         raise HTTPException(
@@ -331,7 +529,7 @@ async def pause_campaign(
             detail="Campaign not found or cannot be paused"
         )
 
-    return CampaignResponse.from_orm(campaign)
+    return _serialize_campaign(campaign)
 
 
 @router.post(
@@ -348,8 +546,7 @@ async def complete_campaign(
     """
     Mark campaign as completed.
     """
-    campaign_repo = CampaignRepository(db)
-    campaign = await campaign_repo.complete_campaign(campaign_id)
+    campaign = _set_campaign_status(db, campaign_id, CampaignStatus.COMPLETED)
 
     if not campaign:
         raise HTTPException(
@@ -357,7 +554,7 @@ async def complete_campaign(
             detail="Campaign not found or cannot be completed"
         )
 
-    return CampaignResponse.from_orm(campaign)
+    return _serialize_campaign(campaign)
 
 
 @router.get(
@@ -376,14 +573,16 @@ async def get_campaigns_by_status(
     """
     Get campaigns filtered by specific status.
     """
-    campaign_repo = CampaignRepository(db)
-
-    skip = (page - 1) * size
-    campaigns = await campaign_repo.get_by_status(status, skip=skip, limit=size)
-    total = await campaign_repo.count(filters={"status": status.value})
+    conditions, params = _build_campaign_filters(status=status.value)
+    total = _count_campaigns(db, conditions, params)
+    campaigns = _get_campaign_rows(
+        db,
+        f"SELECT * FROM campaigns WHERE {conditions} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        params + (size, (page - 1) * size),
+    )
 
     return CampaignListResponse(
-        campaigns=[CampaignResponse.from_orm(campaign) for campaign in campaigns],
+        campaigns=[_serialize_campaign(campaign) for campaign in campaigns],
         total=total,
         page=page,
         size=size,
@@ -408,24 +607,16 @@ async def get_campaigns_by_user(
     """
     Get campaigns created by a specific user.
     """
-    campaign_repo = CampaignRepository(db)
-
-    skip = (page - 1) * size
-    campaigns = await campaign_repo.get_user_campaigns(
-        user_id=user_id,
-        status=status,
-        skip=skip,
-        limit=size
+    conditions, params = _build_campaign_filters(status=status.value if status else None, created_by=user_id)
+    total = _count_campaigns(db, conditions, params)
+    campaigns = _get_campaign_rows(
+        db,
+        f"SELECT * FROM campaigns{' WHERE ' + conditions if conditions else ''} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        params + (size, (page - 1) * size),
     )
 
-    # Count total for this user
-    filters = {"created_by": user_id}
-    if status:
-        filters["status"] = status.value
-    total = await campaign_repo.count(filters=filters)
-
     return CampaignListResponse(
-        campaigns=[CampaignResponse.from_orm(campaign) for campaign in campaigns],
+        campaigns=[_serialize_campaign(campaign) for campaign in campaigns],
         total=total,
         page=page,
         size=size,
@@ -448,18 +639,15 @@ async def get_running_campaigns(
     """
     Get campaigns that are currently running (started but not ended).
     """
-    campaign_repo = CampaignRepository(db)
-
-    skip = (page - 1) * size
-    campaigns = await campaign_repo.get_running_campaigns(skip=skip, limit=size)
-
-    # Count running campaigns
-    total = await campaign_repo.count(
-        filters={"status": CampaignStatus.ACTIVE.value}
+    total = _count_campaigns(db, "status = ?", (CampaignStatus.ACTIVE.value,))
+    campaigns = _get_campaign_rows(
+        db,
+        "SELECT * FROM campaigns WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        (CampaignStatus.ACTIVE.value, size, (page - 1) * size),
     )
 
     return CampaignListResponse(
-        campaigns=[CampaignResponse.from_orm(campaign) for campaign in campaigns],
+        campaigns=[_serialize_campaign(campaign) for campaign in campaigns],
         total=total,
         page=page,
         size=size,
@@ -482,14 +670,15 @@ async def get_overdue_campaigns(
     """
     Get campaigns that have been running for an extended period.
     """
-    campaign_repo = CampaignRepository(db)
-
-    skip = (page - 1) * size
-    campaigns = await campaign_repo.get_overdue_campaigns(skip=skip, limit=size)
-    total = len(campaigns)  # Simplified count
+    campaigns = _get_campaign_rows(
+        db,
+        "SELECT * FROM campaigns WHERE status = ? ORDER BY created_at ASC LIMIT ? OFFSET ?",
+        (CampaignStatus.ACTIVE.value, size, (page - 1) * size),
+    )
+    total = _count_campaigns(db, "status = ?", (CampaignStatus.ACTIVE.value,))
 
     return CampaignListResponse(
-        campaigns=[CampaignResponse.from_orm(campaign) for campaign in campaigns],
+        campaigns=[_serialize_campaign(campaign) for campaign in campaigns],
         total=total,
         page=page,
         size=size,
@@ -511,8 +700,6 @@ async def bulk_campaign_operations(
     Perform bulk operations on multiple campaigns.
     Supported operations: update_status, delete
     """
-    campaign_repo = CampaignRepository(db)
-
     if operation_data.operation == "update_status":
         if not operation_data.data or "status" not in operation_data.data:
             raise HTTPException(
@@ -522,7 +709,10 @@ async def bulk_campaign_operations(
 
         try:
             campaign_status = CampaignStatus(operation_data.data["status"])
-            count = await campaign_repo.bulk_update_status(operation_data.campaign_ids, campaign_status)
+            count = 0
+            for campaign_id in operation_data.campaign_ids:
+                if _set_campaign_status(db, campaign_id, campaign_status):
+                    count += 1
             return {"message": f"Updated status for {count} campaigns"}
         except ValueError:
             raise HTTPException(
@@ -533,7 +723,11 @@ async def bulk_campaign_operations(
     elif operation_data.operation == "delete":
         count = 0
         for campaign_id in operation_data.campaign_ids:
-            if await campaign_repo.delete(campaign_id):
+            if _get_campaign_by_id(db, campaign_id):
+                db.execute_write(
+                    "UPDATE campaigns SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (CampaignStatus.ARCHIVED.value, campaign_id),
+                )
                 count += 1
         return {"message": f"Deleted {count} campaigns"}
 

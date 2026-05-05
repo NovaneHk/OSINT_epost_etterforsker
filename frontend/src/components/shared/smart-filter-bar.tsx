@@ -54,7 +54,7 @@ interface SavedView {
 interface FilterChip {
   type: 'search' | 'tag' | 'score' | 'date' | 'source' | 'status';
   label: string;
-  value: string | number | [number, number] | [Date, Date];
+  value: string | number | [number, number] | [Date, Date] | { from: Date; to: Date };
   removable?: boolean;
 }
 
@@ -124,6 +124,19 @@ export function SmartFilterBar({
       onFiltersChange?.(newFilters);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    const mergedFilters: FilterState = {
+      search: '',
+      tags: [],
+      scoreRange: [0, 100],
+      sources: [],
+      ...initialFilters
+    };
+
+    setFilters(mergedFilters);
+    setSearchValue(mergedFilters.search);
+  }, [initialFilters]);
 
   // Update URL when filters change
   const updateURL = (newFilters: FilterState) => {
@@ -278,7 +291,7 @@ export function SmartFilterBar({
     if (filters.dateRange) {
       chips.push({
         type: 'date',
-        label: `Dato: ${formatDate(filters.dateRange[0], 'short')} - ${formatDate(filters.dateRange[1], 'short')}`,
+        label: `Dato: ${formatDate(filters.dateRange.from, 'short')} - ${formatDate(filters.dateRange.to, 'short')}`,
         value: filters.dateRange
       });
     }
@@ -533,13 +546,13 @@ function AdvancedFilters({
         <CalendarComponent
           mode="range"
           selected={{
-            from: localFilters.dateRange?.[0],
-            to: localFilters.dateRange?.[1]
+            from: localFilters.dateRange?.from,
+            to: localFilters.dateRange?.to
           }}
           onSelect={(range) =>
             setLocalFilters({
               ...localFilters,
-              dateRange: range?.from && range?.to ? [range.from, range.to] : undefined
+              dateRange: range?.from && range?.to ? { from: range.from, to: range.to } : undefined
             })
           }
           className="rounded-md border"

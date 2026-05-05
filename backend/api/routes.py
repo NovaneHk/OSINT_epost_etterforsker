@@ -18,7 +18,19 @@ from backend.api import (
     kpis,
     activity,
     settings,
-    health
+    health,
+    websocket,
+    playbooks,
+    investigations,
+    analytics,
+    notifications,
+    mfa,
+    audit,
+    nlq,
+    integrations,
+    gdpr,
+    scheduler,
+    reports,
 )
 
 # Create main API router
@@ -36,6 +48,18 @@ api_router.include_router(kpis.router)
 api_router.include_router(activity.router)
 api_router.include_router(settings.router)
 api_router.include_router(health.router)
+api_router.include_router(websocket.router)
+api_router.include_router(playbooks.router)
+api_router.include_router(investigations.router)
+api_router.include_router(analytics.router)
+api_router.include_router(notifications.router)
+api_router.include_router(mfa.router)
+api_router.include_router(audit.router)
+api_router.include_router(nlq.router)
+api_router.include_router(integrations.router)
+api_router.include_router(gdpr.router)
+api_router.include_router(scheduler.router)
+api_router.include_router(reports.router)
 
 
 # Root endpoints
@@ -200,6 +224,15 @@ async def api_root():
                     "GET /health/version - Get service version information",
                     "GET /health/ping - Simple ping endpoint"
                 ]
+            },
+            "websocket": {
+                "base_url": "/api/ws",
+                "description": "WebSocket endpoints for real-time data and notifications",
+                "endpoints": [
+                    "WebSocket /ws/metrics - Real-time performance metrics updates",
+                    "WebSocket /ws/status - Real-time system status updates",
+                    "WebSocket /ws/notifications - Real-time user notifications"
+                ]
             }
         },
         "features": [
@@ -207,6 +240,7 @@ async def api_root():
             "Comprehensive CRUD operations for all entities",
             "Advanced filtering and pagination",
             "Real-time search run monitoring",
+            "WebSocket communication for real-time updates",
             "Multi-format data exports (CSV, JSON, Excel)",
             "OSINT source health monitoring",
             "Lead verification and enrichment",
@@ -261,6 +295,11 @@ async def health_check():
                 "status": "healthy",
                 "queue_length": 3,
                 "processing_rate": 45.2
+            },
+            "websocket": {
+                "status": "healthy",
+                "active_connections": 0,
+                "messages_per_minute": 120
             }
         },
         "metrics": {
@@ -322,6 +361,10 @@ async def get_api_version():
             "analytics": {
                 "version": "1.0.0",
                 "features": ["KPI Dashboard", "Trend Analysis", "Performance Metrics"]
+            },
+            "websocket": {
+                "version": "1.0.0",
+                "features": ["Real-time Metrics", "System Status Updates", "User Notifications"]
             }
         },
         "database_schema_version": "1.0.0",
@@ -377,5 +420,10 @@ async def get_api_statistics(
             "searches_executed_24h": 234,
             "exports_generated_24h": 78,
             "sources_monitored": 45
+        },
+        "websocket": {
+            "active_connections": 0,
+            "messages_sent_24h": 12345,
+            "average_connection_duration_minutes": 15.7
         }
     }

@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Dict, List, Optional
 
 from passlib.context import CryptContext
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import Boolean, DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -253,7 +253,8 @@ class UserBase(BaseModel):
     phone: Optional[str] = Field(None, max_length=50)
     bio: Optional[str] = Field(None, max_length=1000)
 
-    @validator('username')
+    @field_validator('username')
+    @classmethod
     def validate_username(cls, v):
         if v is not None:
             if not v.isalnum():
@@ -265,7 +266,8 @@ class UserCreate(UserBase):
     """Schema for creating a user"""
     password: str = Field(..., min_length=8, max_length=128)
 
-    @validator('password')
+    @field_validator('password')
+    @classmethod
     def validate_password(cls, v):
         if len(v) < 8:
             raise ValueError('Password must be at least 8 characters long')
@@ -293,6 +295,7 @@ class UserUpdate(BaseModel):
 class UserResponse(UserBase):
     """Schema for user response"""
     id: str
+    email: str  # Override EmailStr: accept any stored address including internal domains
     status: UserStatus
     is_active: bool
     is_verified: bool
@@ -335,7 +338,8 @@ class UserChangePassword(BaseModel):
     current_password: str
     new_password: str = Field(..., min_length=8, max_length=128)
 
-    @validator('new_password')
+    @field_validator('new_password')
+    @classmethod
     def validate_new_password(cls, v):
         if len(v) < 8:
             raise ValueError('Password must be at least 8 characters long')

@@ -3,10 +3,13 @@ const nextConfig = {
   // Enable standalone output for Docker
   output: 'standalone',
 
+  allowedDevOrigins: ['127.0.0.1', 'localhost'],
+
+  // Transpile packages that need it
+  transpilePackages: [],
+
   // Experimental features
   experimental: {
-    // Server components logging
-    serverComponentsExternalPackages: [],
     // Optimize bundle size
     optimizeCss: true,
   },
@@ -107,11 +110,13 @@ const nextConfig = {
   },
 
   // Rewrites for API proxy
+  // BACKEND_URL is a server-side only env var (read at runtime by the Node.js server).
+  // NEXT_PUBLIC_API_URL is a client-side var (baked at build time) — do NOT use it here.
   async rewrites() {
     return [
       {
         source: '/api/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/:path*`,
+        destination: `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/:path*`,
       },
     ];
   },
@@ -119,8 +124,12 @@ const nextConfig = {
 
   // Webpack configuration
   webpack: (config, { buildId, dev, isServer, defaultLoaders, webpack }) => {
-    // Production optimizations
-    if (!dev) {
+    // For server builds, disable chunk splitting to avoid runtime issues
+    if (isServer) {
+      config.optimization.splitChunks = false;
+      config.optimization.runtimeChunk = false;
+    } else if (!dev) {
+      // Production optimizations for client only
       // Split chunks optimization
       config.optimization.splitChunks = {
         chunks: 'all',

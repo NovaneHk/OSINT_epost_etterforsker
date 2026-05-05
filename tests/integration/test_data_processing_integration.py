@@ -385,14 +385,14 @@ class TestDataProcessingIntegration:
         # Test specific component health checks
         db_health = health_monitor.check_database_health()
         assert db_health.component_name == "database"
-        assert db_health.status in ["healthy", "warning", "error"]
+        assert db_health.status.value in ["healthy", "warning", "critical", "error"]
 
         config_health = health_monitor.check_configuration_health()
         assert config_health.component_name == "configuration"
-        assert config_health.status in ["healthy", "warning", "error"]
+        assert config_health.status.value in ["healthy", "warning", "critical", "error"]
 
         # Test system metrics
-        metrics = health_monitor.get_system_metrics()
+        metrics = health_monitor.get_contact_metrics()
         assert 'total_contacts' in metrics
         assert 'contacts_by_status' in metrics
         assert 'average_score' in metrics

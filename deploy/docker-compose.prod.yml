@@ -42,7 +42,7 @@ services:
     networks:
       - osint_network
     healthcheck:
-      test: ["CMD", "python", "/app/health_check.py"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -60,7 +60,7 @@ services:
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+      - ../database/postgresql-setup.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
     networks:
       - osint_network
     healthcheck:

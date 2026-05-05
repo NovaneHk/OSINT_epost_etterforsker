@@ -1,30 +1,89 @@
-"""
-OSINT E-post Etterforsker - Users API Endpoints
-User management and administration endpoints
-"""
+"""User management endpoints backed by the project's SQLite store."""
 
-from typing import Annotated, List, Optional
+from datetime import datetime
+from typing import Annotated, Any, Dict, List, Optional
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 
-from backend.core.dependencies import (
-    DatabaseSession,
-    CommonQuery,
-    PermissionDeps
-)
-from backend.models.user import (
-    User,
-    UserCreate,
-    UserUpdate,
-    UserResponse,
-    UserListResponse,
-    UserRole
-)
-from backend.repositories.user import UserRepository
+from backend.core.dependencies import CommonQuery, DatabaseSession, PermissionDeps
+from backend.models.user import UserCreate, UserListResponse, UserResponse, UserRole, UserStatus, UserUpdate
 from backend.core.security import password_hash
 
 
 router = APIRouter(prefix="/users", tags=["Users"])
+
+
+def _get_user_by_query(db: DatabaseSession, query: str, params: tuple[Any, ...] = ()) -> Dict[str, Any] | None:
+    rows = db.execute_query(query, params)
+    return rows[0] if rows else None
+
+
+def _serialize_user(row: Dict[str, Any]) -> UserResponse:
+    return UserResponse(
+        id=str(row["id"]),
+        email=row["email"],
+        username=row.get("username"),
+        full_name=row.get("full_name") or row.get("username") or row["email"],
+        role=UserRole(row.get("role", "viewer")),
+        status=UserStatus(row.get("status", "active")),
+        is_active=bool(row.get("is_active", 1)),
+        is_verified=bool(row.get("is_verified", 0)),
+        avatar_url=row.get("avatar_url"),
+        company=row.get("company"),
+        department=row.get("department"),
+        job_title=row.get("job_title"),
+        phone=row.get("phone"),
+        bio=row.get("bio"),
+        last_login_at=row.get("last_login_at"),
+        login_count=int(row.get("login_count", 0) or 0),
+        created_at=row.get("created_at") or datetime.utcnow(),
+        updated_at=row.get("updated_at") or datetime.utcnow(),
+    )
+
+
+def _count_users(db: DatabaseSession, conditions: str = "", params: tuple[Any, ...] = ()) -> int:
+    query = "SELECT COUNT(*) AS total FROM users"
+    if conditions:
+        query += f" WHERE {conditions}"
+    result = db.execute_query(query, params)
+    return int(result[0]["total"]) if result else 0
+
+
+def _build_user_filters(
+    role: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    search: Optional[str] = None,
+) -> tuple[str, tuple[Any, ...]]:
+    conditions: List[str] = []
+    params: List[Any] = []
+
+    if role:
+        conditions.append("role = ?")
+        params.append(role)
+
+    if is_active is not None:
+        conditions.append("is_active = ?")
+        params.append(1 if is_active else 0)
+
+    if search:
+        conditions.append("(email LIKE ? OR username LIKE ? OR full_name LIKE ?)")
+        search_term = f"%{search}%"
+        params.extend([search_term, search_term, search_term])
+
+    return " AND ".join(conditions), tuple(params)
+
+
+def _map_sort_field(sort_field: str) -> str:
+    sort_mapping = {
+        "name": "full_name",
+        "created_at": "created_at",
+        "updated_at": "updated_at",
+        "email": "email",
+        "status": "status",
+        "id": "id",
+    }
+    return sort_mapping.get(sort_field, "created_at")
 
 
 @router.get(
@@ -44,30 +103,33 @@ async def list_users(
     List users with pagination and filtering.
     Requires 'create:users' permission.
     """
-    user_repo = UserRepository(db)
+    conditions, params = _build_user_filters(
+        role=role.value if role else None,
+        is_active=is_active,
+        search=common.search["query"],
+    )
+    total = _count_users(db, conditions, params)
+    sort_field = _map_sort_field(common.search["sort"])
+    sort_order = "DESC" if common.search["order"].lower() == "desc" else "ASC"
 
-    # Build filters
-    filters = {}
-    if role:
-        filters["role"] = role.value
-    if is_active is not None:
-        filters["is_active"] = is_active
+    query = """
+        SELECT * FROM users
+    """
+    if conditions:
+        query += f" WHERE {conditions}"
+    query += f" ORDER BY {sort_field} {sort_order} LIMIT ? OFFSET ?"
 
-    # Get paginated results
-    result = await user_repo.get_paginated(
-        page=common.pagination["page"],
-        size=common.pagination["size"],
-        filters=filters,
-        order_by=common.search["sort"],
-        order_direction=common.search["order"]
+    rows = db.execute_query(
+        query,
+        params + (common.pagination["size"], common.pagination["offset"]),
     )
 
     return UserListResponse(
-        users=[UserResponse.from_orm(user) for user in result["records"]],
-        total=result["total"],
-        page=result["page"],
-        size=result["size"],
-        pages=result["pages"]
+        users=[_serialize_user(user) for user in rows],
+        total=total,
+        page=common.pagination["page"],
+        size=common.pagination["size"],
+        pages=(total + common.pagination["size"] - 1) // common.pagination["size"] if total else 0,
     )
 
 
@@ -88,18 +150,24 @@ async def search_users(
     Search users by email, username, first name, or last name.
     Requires 'create:users' permission.
     """
-    user_repo = UserRepository(db)
-
-    skip = (page - 1) * size
-    users = await user_repo.search_users(q, skip=skip, limit=size)
-    total = len(users)  # For simplicity, in production you'd want proper count
+    conditions, params = _build_user_filters(search=q)
+    total = _count_users(db, conditions, params)
+    users = db.execute_query(
+        """
+        SELECT * FROM users
+        WHERE (email LIKE ? OR username LIKE ? OR full_name LIKE ?)
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+        """,
+        params + (size, (page - 1) * size),
+    )
 
     return UserListResponse(
-        users=[UserResponse.from_orm(user) for user in users],
+        users=[_serialize_user(user) for user in users],
         total=total,
         page=page,
         size=size,
-        pages=(total + size - 1) // size
+        pages=(total + size - 1) // size if total else 0,
     )
 
 
@@ -116,8 +184,25 @@ async def get_user_statistics(
     Get user statistics including totals by role and activity.
     Requires 'system:administration' permission.
     """
-    user_repo = UserRepository(db)
-    return await user_repo.get_user_statistics()
+    total_users = _count_users(db)
+    active_users = _count_users(db, "is_active = ?", (1,))
+    recent_registrations = _count_users(
+        db,
+        "datetime(created_at) >= datetime('now', '-30 days')",
+    )
+    users_by_role = {
+        role.value: _count_users(db, "role = ?", (role.value,))
+        for role in UserRole
+    }
+
+    return {
+        "total_users": total_users,
+        "active_users": active_users,
+        "inactive_users": total_users - active_users,
+        "users_by_role": users_by_role,
+        "recent_registrations": recent_registrations,
+        "avg_session_duration": None,
+    }
 
 
 @router.post(
@@ -136,28 +221,44 @@ async def create_user(
     Create a new user account.
     Requires 'create:users' permission.
     """
-    user_repo = UserRepository(db)
-
-    # Check if email already exists
-    if await user_repo.email_exists(user_data.email):
+    if _get_user_by_query(db, "SELECT id FROM users WHERE email = ? LIMIT 1", (str(user_data.email),)):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
         )
 
-    # Check if username already exists
-    if await user_repo.username_exists(user_data.username):
+    if user_data.username and _get_user_by_query(db, "SELECT id FROM users WHERE username = ? LIMIT 1", (user_data.username,)):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username already taken"
         )
 
-    # Hash password if provided
-    if user_data.password_hash:
-        user_data.password_hash = password_hash.hash_password(user_data.password_hash)
-
-    user = await user_repo.create(user_data)
-    return UserResponse.from_orm(user)
+    user_id = str(uuid4())
+    db.execute_write(
+        """
+        INSERT INTO users (
+            id, email, username, full_name, hashed_password, role, status,
+            is_active, is_verified, company, department, job_title, phone, bio, login_count
+        ) VALUES (?, ?, ?, ?, ?, ?, 'active', 1, 0, ?, ?, ?, ?, ?, 0)
+        """,
+        (
+            user_id,
+            str(user_data.email),
+            user_data.username,
+            user_data.full_name,
+            password_hash.hash_password(user_data.password),
+            user_data.role.value,
+            user_data.company,
+            user_data.department,
+            user_data.job_title,
+            user_data.phone,
+            user_data.bio,
+        ),
+    )
+    user = _get_user_by_query(db, "SELECT * FROM users WHERE id = ? LIMIT 1", (user_id,))
+    if not user:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create user")
+    return _serialize_user(user)
 
 
 @router.get(
@@ -175,16 +276,14 @@ async def get_user(
     Get user by ID.
     Requires 'create:users' permission.
     """
-    user_repo = UserRepository(db)
-    user = await user_repo.get_by_id(user_id)
+    user = _get_user_by_query(db, "SELECT * FROM users WHERE id = ? LIMIT 1", (user_id,))
 
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-
-    return UserResponse.from_orm(user)
+    return _serialize_user(user)
 
 
 @router.put(
@@ -203,8 +302,7 @@ async def update_user(
     Update user information.
     Requires 'update:users' permission.
     """
-    user_repo = UserRepository(db)
-    user = await user_repo.get_by_id(user_id)
+    user = _get_user_by_query(db, "SELECT * FROM users WHERE id = ? LIMIT 1", (user_id,))
 
     if not user:
         raise HTTPException(
@@ -213,9 +311,13 @@ async def update_user(
         )
 
     # Check email uniqueness if being updated
-    update_data = user_update.dict(exclude_unset=True)
+    update_data = user_update.model_dump(exclude_unset=True)
     if "email" in update_data:
-        if await user_repo.email_exists(update_data["email"], exclude_id=user_id):
+        if _get_user_by_query(
+            db,
+            "SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1",
+            (update_data["email"], user_id),
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered"
@@ -223,18 +325,40 @@ async def update_user(
 
     # Check username uniqueness if being updated
     if "username" in update_data:
-        if await user_repo.username_exists(update_data["username"], exclude_id=user_id):
+        if _get_user_by_query(
+            db,
+            "SELECT id FROM users WHERE username = ? AND id != ? LIMIT 1",
+            (update_data["username"], user_id),
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Username already taken"
             )
 
-    # Hash password if being updated
-    if "password_hash" in update_data and update_data["password_hash"]:
-        update_data["password_hash"] = password_hash.hash_password(update_data["password_hash"])
+    if not update_data:
+        return _serialize_user(user)
 
-    updated_user = await user_repo.update(user, update_data)
-    return UserResponse.from_orm(updated_user)
+    # Whitelist of columns that may be updated to prevent SQL injection
+    _ALLOWED_UPDATE_COLS = frozenset({
+        "full_name", "username", "company", "department",
+        "job_title", "phone", "bio", "avatar_url",
+    })
+    invalid = set(update_data.keys()) - _ALLOWED_UPDATE_COLS
+    if invalid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Unknown update fields: {', '.join(sorted(invalid))}")
+
+    assignments = ", ".join(f"{field} = ?" for field in update_data)  # nosec B608 — field names whitelisted above
+    params = tuple(update_data.values()) + (user_id,)
+    db.execute_write(
+        f"UPDATE users SET {assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        params,
+    )
+
+    updated_user = _get_user_by_query(db, "SELECT * FROM users WHERE id = ? LIMIT 1", (user_id,))
+    if not updated_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return _serialize_user(updated_user)
 
 
 @router.delete(
@@ -252,10 +376,7 @@ async def delete_user(
     Delete user account (soft delete).
     Requires 'delete:users' permission.
     """
-    user_repo = UserRepository(db)
-
-    # Check if user exists
-    user = await user_repo.get_by_id(user_id)
+    user = _get_user_by_query(db, "SELECT * FROM users WHERE id = ? LIMIT 1", (user_id,))
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -269,7 +390,14 @@ async def delete_user(
             detail="Cannot delete your own account"
         )
 
-    await user_repo.delete(user_id)
+    db.execute_write(
+        """
+        UPDATE users
+        SET is_active = 0, status = 'inactive', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (user_id,),
+    )
 
 
 @router.post(
@@ -287,16 +415,22 @@ async def activate_user(
     Activate user account.
     Requires 'update:users' permission.
     """
-    user_repo = UserRepository(db)
-    user = await user_repo.activate_user(user_id)
+    db.execute_write(
+        """
+        UPDATE users
+        SET is_active = 1, status = 'active', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (user_id,),
+    )
+    user = _get_user_by_query(db, "SELECT * FROM users WHERE id = ? LIMIT 1", (user_id,))
 
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-
-    return UserResponse.from_orm(user)
+    return _serialize_user(user)
 
 
 @router.post(
@@ -314,8 +448,6 @@ async def deactivate_user(
     Deactivate user account.
     Requires 'update:users' permission.
     """
-    user_repo = UserRepository(db)
-
     # Prevent self-deactivation
     if user_id == current_user.id:
         raise HTTPException(
@@ -323,15 +455,22 @@ async def deactivate_user(
             detail="Cannot deactivate your own account"
         )
 
-    user = await user_repo.deactivate_user(user_id)
+    db.execute_write(
+        """
+        UPDATE users
+        SET is_active = 0, status = 'inactive', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (user_id,),
+    )
+    user = _get_user_by_query(db, "SELECT * FROM users WHERE id = ? LIMIT 1", (user_id,))
 
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-
-    return UserResponse.from_orm(user)
+    return _serialize_user(user)
 
 
 @router.get(
@@ -351,16 +490,21 @@ async def get_users_by_role(
     Get users by specific role.
     Requires 'create:users' permission.
     """
-    user_repo = UserRepository(db)
-
-    skip = (page - 1) * size
-    users = await user_repo.get_users_by_role(role.value, skip=skip, limit=size)
-    total = await user_repo.count(filters={"role": role.value})
+    total = _count_users(db, "role = ?", (role.value,))
+    users = db.execute_query(
+        """
+        SELECT * FROM users
+        WHERE role = ?
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+        """,
+        (role.value, size, (page - 1) * size),
+    )
 
     return UserListResponse(
-        users=[UserResponse.from_orm(user) for user in users],
+        users=[_serialize_user(user) for user in users],
         total=total,
         page=page,
         size=size,
-        pages=(total + size - 1) // size
+        pages=(total + size - 1) // size if total else 0,
     )

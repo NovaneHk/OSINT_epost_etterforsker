@@ -13,13 +13,47 @@ try:
 except ImportError:
     TheHarvesterEnhanced = None
 
-# Future Phase 3 Connectors (will be implemented)
-# from .spiderfoot_connector import SpiderFootConnector
-# from .reconng_connector import ReconNGConnector
+# Future Phase 3 Connectors
+try:
+    from .spiderfoot_connector import SpiderFootConnector
+except ImportError:
+    SpiderFootConnector = None
+
+try:
+    from .reconng_connector import ReconNGConnector
+except ImportError:
+    ReconNGConnector = None
+
+try:
+    from .intelowl_connector import IntelOwlConnector
+except ImportError:
+    IntelOwlConnector = None
+
+# Wave 4 Connectors
+try:
+    from .metagoofil_connector import MetagoofilConnector
+except ImportError:
+    MetagoofilConnector = None
+
+try:
+    from .pwndb_connector import PwnDBConnector
+except ImportError:
+    PwnDBConnector = None
+
+try:
+    from .novanexus_connector import NovaNexusConnector
+except ImportError:
+    NovaNexusConnector = None
 
 __all__ = [
     'BaseConnector',
     'TheHarvesterConnector',
     'HIBPConnector',
-    'TheHarvesterEnhanced'
+    'TheHarvesterEnhanced',
+    'SpiderFootConnector',
+    'ReconNGConnector',
+    'IntelOwlConnector',
+    'MetagoofilConnector',
+    'PwnDBConnector',
+    'NovaNexusConnector',
 ]

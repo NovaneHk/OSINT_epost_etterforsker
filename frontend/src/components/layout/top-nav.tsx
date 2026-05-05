@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -37,47 +38,72 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { api } from '@/lib/api';
+import { useAuthStore } from '@/store/auth';
+
+interface Notification {
+  id: string | number;
+  title: string;
+  message: string;
+  time: string;
+  unread: boolean;
+  type: 'success' | 'info' | 'update';
+  icon: typeof TrendingUp;
+}
 
 export function TopNav() {
   const { theme, setTheme } = useTheme();
+  const router = useRouter();
+  const { user, logout } = useAuthStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [notifications] = useState([
-    {
-      id: 1,
-      title: 'Ny kjøring fullført',
-      message: '1,234 leads funnet fra LinkedIn',
-      time: '2 min siden',
-      unread: true,
-      type: 'success',
-      icon: TrendingUp
-    },
-    {
-      id: 2,
-      title: 'Export klar',
-      message: 'CSV-fil med 856 leads er klar for nedlasting',
-      time: '10 min siden',
-      unread: true,
-      type: 'info',
-      icon: Download
-    },
-    {
-      id: 3,
-      title: 'Systemoppdatering',
-      message: 'OSINT Pro v1.0.1 er tilgjengelig',
-      time: '1 time siden',
-      unread: false,
-      type: 'update',
-      icon: Sparkles
-    },
-  ]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const iconMap: Record<string, typeof TrendingUp> = {
+    TrendingUp,
+    Download,
+    Shield,
+    Sparkles,
+  };
 
   const unreadCount = notifications.filter(n => n.unread).length;
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Poll notifications every 30s
+  useEffect(() => {
+    const fetchNotifications = async () => {
+      try {
+        const data = await api.getNotifications(10);
+        setNotifications(
+          (data as any[]).map((n: any) => ({
+            ...n,
+            icon: iconMap[n.icon] || Bell,
+          }))
+        );
+      } catch {
+        // silently ignore
+      }
+    };
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Debounced search navigation
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (value.trim().length >= 2) {
+      debounceRef.current = setTimeout(() => {
+        router.push(`/leads?search=${encodeURIComponent(value.trim())}`);
+      }, 500);
+    }
+  };
 
   const searchVariants = {
     focused: {
@@ -126,7 +152,7 @@ export function TopNav() {
             type="search"
             placeholder="Søk i leads, kilder, kjøringer... (Ctrl+K)"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
             onFocus={() => setIsSearchFocused(true)}
             onBlur={() => setIsSearchFocused(false)}
             className="w-64 pl-10 pr-16 lg:w-96 bg-light-bg-secondary dark:bg-dark-bg-secondary border-light-border dark:border-dark-border focus:border-osint-primary dark:focus:border-osint-primary transition-all duration-200"
@@ -347,6 +373,7 @@ export function TopNav() {
           <DropdownMenuTrigger asChild>
             <motion.div variants={buttonVariants} whileHover="hover" whileTap="tap">
               <Button
+                data-testid="user-menu"
                 variant="ghost"
                 className="relative h-10 w-auto rounded-lg px-3 hover:bg-light-surface-hover dark:hover:bg-dark-surface-hover"
               >
@@ -414,9 +441,12 @@ export function TopNav() {
               <span>Aktivitetslogg</span>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-osint-error hover:bg-osint-error/10 hover:text-osint-error">
+            <DropdownMenuItem
+              className="text-osint-error hover:bg-osint-error/10 hover:text-osint-error"
+              onClick={() => { logout(); router.push('/login'); }}
+            >
               <LogOut className="mr-3 h-4 w-4" />
-              <span>Logg ut</span>
+              <span>Logout</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

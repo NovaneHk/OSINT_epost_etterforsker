@@ -1,22 +1,14 @@
 """
 KPI (Key Performance Indicators) API endpoints
-Dashboard metrics and statistics for the OSINT system
+Dashboard metrics and statistics for the OSINT system — uses raw SQLite queries.
 """
 
 from datetime import datetime, timedelta
-from typing import Dict, List, Any
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, select
+from typing import Any
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
-from backend.core.dependencies import DatabaseSession
-from backend.models.lead import Lead
-from backend.models.source import Source
-from backend.models.campaign import Campaign
-from backend.models.export import Export
-from backend.models.search_run import SearchRun
+from backend.core.dependencies import DatabaseSession, CurrentUser
 
-# Pydantic response model
 class BaseResponse(BaseModel):
     data: Any = None
     message: str = "Success"
@@ -24,91 +16,49 @@ class BaseResponse(BaseModel):
 router = APIRouter(prefix="/kpis", tags=["KPIs"])
 
 
+def _scalar(db, sql, params=()):
+    rows = db.execute_query(sql, params)
+    if rows:
+        return list(rows[0].values())[0] or 0
+    return 0
+
+
 @router.get("/", response_model=BaseResponse)
-async def get_kpis(db: DatabaseSession):
-    """
-    Get key performance indicators for the dashboard
-
-    Returns comprehensive KPI data including:
-    - Total leads count
-    - Lead quality score average
-    - Source status distribution
-    - Campaign performance metrics
-    - Recent activity trends
-    """
+async def get_kpis(db: DatabaseSession, current_user: CurrentUser):
+    """Get key performance indicators for the dashboard."""
     try:
-        # Calculate date ranges
         now = datetime.utcnow()
-        week_ago = now - timedelta(days=7)
-        month_ago = now - timedelta(days=30)
+        week_ago = (now - timedelta(days=7)).isoformat()
+        month_ago = (now - timedelta(days=30)).isoformat()
+        week_before_last = (now - timedelta(days=14)).isoformat()
 
-        # Total leads
-        total_leads_result = await db.execute(
-            select(func.count(Lead.id))
-        )
-        total_leads = total_leads_result.scalar() or 0
+        total_leads = _scalar(db, "SELECT COUNT(*) as c FROM leads")
+        new_leads_week = _scalar(db, "SELECT COUNT(*) as c FROM leads WHERE created_at >= ?", (week_ago,))
+        avg_score = _scalar(db, "SELECT AVG(confidence_score) as c FROM leads WHERE confidence_score IS NOT NULL")
+        verified_leads = _scalar(db, "SELECT COUNT(*) as c FROM leads WHERE verification_status = 'verified'")
+        pending_leads = _scalar(db, "SELECT COUNT(*) as c FROM leads WHERE verification_status IN ('pending','unverified')")
+        active_sources = _scalar(db, "SELECT COUNT(*) as c FROM sources WHERE status = 'active'")
+        recent_campaigns = _scalar(db, "SELECT COUNT(*) as c FROM campaigns WHERE created_at >= ?", (month_ago,))
+        previous_week_leads = _scalar(db, "SELECT COUNT(*) as c FROM leads WHERE created_at >= ? AND created_at < ?", (week_before_last, week_ago))
 
-        # New leads this week
-        new_leads_week_result = await db.execute(
-            select(func.count(Lead.id))
-            .where(Lead.created_at >= week_ago)
-        )
-        new_leads_week = new_leads_week_result.scalar() or 0
-
-        # Average lead score
-        avg_score_result = await db.execute(
-            select(func.avg(Lead.score))
-            .where(Lead.score.isnot(None))
-        )
-        avg_score = avg_score_result.scalar() or 0
-
-        # Lead status distribution
-        verified_leads_result = await db.execute(
-            select(func.count(Lead.id))
-            .where(Lead.status == "verified")
-        )
-        verified_leads = verified_leads_result.scalar() or 0
-
-        pending_leads_result = await db.execute(
-            select(func.count(Lead.id))
-            .where(Lead.status == "pending")
-        )
-        pending_leads = pending_leads_result.scalar() or 0
-
-        # Active sources
-        active_sources_result = await db.execute(
-            select(func.count(Source.id))
-            .where(Source.status == "active")
-        )
-        active_sources = active_sources_result.scalar() or 0
-
-        # Recent campaigns
-        recent_campaigns_result = await db.execute(
-            select(func.count(Campaign.id))
-            .where(Campaign.created_at >= month_ago)
-        )
-        recent_campaigns = recent_campaigns_result.scalar() or 0
-
-        # Success rate calculation
         success_rate = (verified_leads / total_leads * 100) if total_leads > 0 else 0
-
-        # Weekly growth calculation
-        week_before_last = week_ago - timedelta(days=7)
-        previous_week_leads_result = await db.execute(
-            select(func.count(Lead.id))
-            .where(Lead.created_at >= week_before_last)
-            .where(Lead.created_at < week_ago)
-        )
-        previous_week_leads = previous_week_leads_result.scalar() or 0
-
         weekly_growth = 0
         if previous_week_leads > 0:
             weekly_growth = ((new_leads_week - previous_week_leads) / previous_week_leads) * 100
         elif new_leads_week > 0:
             weekly_growth = 100
 
-        # Build response data
+        exports7d = _scalar(db, "SELECT COUNT(*) as c FROM exports WHERE created_at >= ?", (week_ago,))
+
         kpi_data = {
+            # Frontend-expected flat shape
+            "leads7d": new_leads_week,
+            "hits7d": new_leads_week,
+            "conversion_rate": round(success_rate, 1),
+            "exports7d": exports7d,
+            "total_sources": active_sources,
+            "active_sources": active_sources,
+            # Detailed breakdown (backward compat)
             "leads": {
                 "total": total_leads,
                 "new_this_week": new_leads_week,
@@ -120,13 +70,8 @@ async def get_kpis(db: DatabaseSession):
                 "average_score": round(avg_score, 1),
                 "success_rate_percent": round(success_rate, 1)
             },
-            "sources": {
-                "active": active_sources,
-                "total": active_sources  # Will be expanded when we have inactive sources
-            },
-            "campaigns": {
-                "recent": recent_campaigns
-            },
+            "sources": {"active": active_sources, "total": active_sources},
+            "campaigns": {"recent": recent_campaigns},
             "overview": {
                 "total_leads": total_leads,
                 "verified_leads": verified_leads,
@@ -135,88 +80,33 @@ async def get_kpis(db: DatabaseSession):
             }
         }
 
-        return BaseResponse(
-            data=kpi_data,
-            message="KPI data retrieved successfully"
-        )
-
+        return BaseResponse(data=kpi_data, message="KPI data retrieved successfully")
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve KPI data: {str(e)}"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve KPI data")
 
 
 @router.get("/trends", response_model=BaseResponse)
-async def get_kpi_trends(
-    days: int = 30,
-    db: DatabaseSession = None
-):
-    """
-    Get KPI trends over time for charts and graphs
-
-    Args:
-        days: Number of days to include in trends (default: 30)
-    """
+async def get_kpi_trends(current_user: CurrentUser, days: int = 30, db: DatabaseSession = None):
+    """Get KPI trends over time for charts and graphs."""
     try:
-        # Calculate date range
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days)
+        start_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
 
-        # Daily lead creation trends
-        daily_leads_result = await db.execute(
-            select(
-                func.date(Lead.created_at).label('date'),
-                func.count(Lead.id).label('count')
-            )
-            .where(Lead.created_at >= start_date)
-            .group_by(func.date(Lead.created_at))
-            .order_by(func.date(Lead.created_at))
+        daily_leads = db.execute_query(
+            "SELECT DATE(created_at) as date, COUNT(*) as count FROM leads WHERE created_at >= ? GROUP BY DATE(created_at) ORDER BY DATE(created_at)",
+            (start_date,)
         )
-        daily_leads = [
-            {
-                "date": str(row.date),
-                "leads": row.count
-            }
-            for row in daily_leads_result.fetchall()
-        ]
-
-        # Quality score trends
-        daily_scores_result = await db.execute(
-            select(
-                func.date(Lead.created_at).label('date'),
-                func.avg(Lead.score).label('avg_score')
-            )
-            .where(Lead.created_at >= start_date)
-            .where(Lead.score.isnot(None))
-            .group_by(func.date(Lead.created_at))
-            .order_by(func.date(Lead.created_at))
+        daily_scores = db.execute_query(
+            "SELECT DATE(created_at) as date, AVG(confidence_score) as avg_score FROM leads WHERE created_at >= ? AND confidence_score IS NOT NULL GROUP BY DATE(created_at) ORDER BY DATE(created_at)",
+            (start_date,)
         )
-        daily_scores = [
-            {
-                "date": str(row.date),
-                "average_score": round(row.avg_score, 1) if row.avg_score else 0
-            }
-            for row in daily_scores_result.fetchall()
-        ]
-
-        trends_data = {
-            "daily_leads": daily_leads,
-            "daily_scores": daily_scores,
-            "period": {
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat(),
-                "days": days
-            }
-        }
 
         return BaseResponse(
-            data=trends_data,
+            data={
+                "daily_leads": [{"date": str(r["date"]), "leads": r["count"]} for r in daily_leads],
+                "daily_scores": [{"date": str(r["date"]), "average_score": round(r["avg_score"] or 0, 1)} for r in daily_scores],
+                "period": {"start_date": start_date, "end_date": datetime.utcnow().isoformat(), "days": days}
+            },
             message="KPI trends retrieved successfully"
         )
-
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve KPI trends: {str(e)}"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to retrieve KPI trends")

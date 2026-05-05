@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
+from collections import deque
 import json
 
 # ML and Analytics imports
@@ -26,6 +27,7 @@ except ImportError:
     logging.warning("ML libraries not available. Install scikit-learn for full functionality.")
 
 from .utils import AIError as OSINTError, simple_error_handler as handle_errors
+from .memory_manager import MemoryManager
 from core.performance import PerformanceMonitor
 
 logger = logging.getLogger(__name__)
@@ -74,8 +76,13 @@ class AIAnalyticsEngine:
         self.models = {}
         self.scalers = {}
         self.model_versions = {}
-        self.threat_database = []
-        self.analysis_history = []
+        self.threat_database = deque(maxlen=1000)  # Limited size for threat database
+        self.analysis_history = deque(maxlen=1000)  # Limited size for analysis history
+        
+        # Memory management
+        self.memory_manager = MemoryManager(
+            threshold=config.get('memory_threshold', 0.8)
+        )
 
         # Initialize ML components if available
         if ML_AVAILABLE:

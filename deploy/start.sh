@@ -11,8 +11,9 @@ if [ -z "$SECRET_KEY" ]; then
     exit 1
 fi
 
-if [ -z "$DB_HOST" ]; then
-    echo "ERROR: DB_HOST environment variable is required"
+# DB_HOST is required only for PostgreSQL deployments; SQLite deployments skip this check
+if [ -z "$DB_HOST" ] && [ "${DATABASE_URL:-}" != sqlite* ]; then
+    echo "ERROR: DB_HOST environment variable is required for PostgreSQL deployments"
     exit 1
 fi
 
@@ -32,7 +33,10 @@ import time
 import sys
 import os
 sys.path.insert(0, '/app')
-from core.database import DatabaseManager
+try:
+    from backend.core.database import DatabaseManager
+except ImportError:
+    from core.database import DatabaseManager
 
 max_attempts = 30
 for attempt in range(max_attempts):
@@ -54,7 +58,10 @@ echo "Initializing database schema..."
 python -c "
 import sys
 sys.path.insert(0, '/app')
-from core.database import DatabaseManager
+try:
+    from backend.core.database import DatabaseManager
+except ImportError:
+    from core.database import DatabaseManager
 db = DatabaseManager()
 db.init_db()
 print('Database schema initialized')
@@ -65,7 +72,10 @@ echo "Validating configuration..."
 python -c "
 import sys
 sys.path.insert(0, '/app')
-from core.config import ConfigManager
+try:
+    from backend.core.config import ConfigManager
+except ImportError:
+    from core.config import ConfigManager
 config_manager = ConfigManager()
 config = config_manager.get_current_config()
 if not config:

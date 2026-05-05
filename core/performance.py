@@ -41,13 +41,14 @@ class PerformanceMonitor:
         self.active_timers = {}
         self.performance_thresholds = {
             'response_time_ms': 2000,
-            'memory_usage_mb': 512,
+            'memory_usage_mb': 20480,  # Increased to 20GB for ML operations
             'cpu_usage_percent': 80,
             'database_query_ms': 1000,
             'email_extraction_rate': 1.0,  # emails per second
-            'validation_rate': 10.0  # validations per second
+            'validation_rate': 10.0,  # validations per second
+            'model_load_time_ms': 5000  # Maximum time to load ML models
         }
-        self.operations = []  # To track operations for get_metrics
+        self.operations = deque(maxlen=1000)  # Limited size for operations tracking
 
         # Start background monitoring
         self._monitoring_active = True
@@ -65,13 +66,28 @@ class PerformanceMonitor:
                 # Collect system metrics
                 self._collect_system_metrics()
 
-                # Sleep for 30 seconds
-                time.sleep(30)
-
+                # Sleep in smaller intervals to allow faster shutdown
+                for _ in range(30):
+                    if not self._monitoring_active:
+                        break
+                    time.sleep(1)
             except Exception as e:
                 logger.error(f"Background monitoring error: {e}")
-                time.sleep(60)  # Wait longer on error
-
+                time.sleep(1)  # Short sleep on error
+                
+    def _check_threshold(self, metric: PerformanceMetric) -> bool:
+        """Check if metric value is within threshold"""
+        threshold = self.performance_thresholds.get(metric.name)
+        if threshold is None:
+            return True  # No threshold defined
+        if metric.value > threshold:
+            logger.warning(
+                f"Performance threshold exceeded: {metric.name} = {metric.value} {metric.unit} "
+                f"(threshold: {threshold} {metric.unit})"
+            )
+            return False
+        return True
+        
     def _collect_system_metrics(self):
         """Collect system performance metrics."""
         try:
@@ -120,8 +136,8 @@ class PerformanceMonitor:
         # Check thresholds
         self._check_threshold(metric)
 
-    def _check_threshold(self, metric: PerformanceMetric):
-        """Check if metric exceeds performance thresholds."""
+    def _log_threshold_breach(self, metric: PerformanceMetric):
+        """Log if metric exceeds performance thresholds."""
         threshold = self.performance_thresholds.get(metric.name)
         if threshold and metric.value > threshold:
             logger.warning(

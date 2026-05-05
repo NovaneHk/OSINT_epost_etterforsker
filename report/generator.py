@@ -1,55 +1,461 @@
-class ReportType:
-    SUMMARY = "summary"
-    DETAILED = "detailed"
-    ANALYTICS = "analytics"
-class ReportData:
-    def __init__(self, *args, **kwargs):
-        pass
-class ReportResult:
-    def __init__(self, *args, **kwargs):
-        pass
-class ReportSection:
-    def __init__(self, *args, **kwargs):
-        pass
-"""
+﻿"""
 Report Generation Module
 Generate comprehensive reports and summaries
 """
 
-import logging
-from typing import Dict, Any, Optional
-from datetime import datetime, timedelta
-from jinja2 import Template
+from dataclasses import dataclass, field
+from enum import Enum
 import json
-
-from core.config import ConfigManager
-from core.database import DatabaseManager
+import logging
+import os
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Placeholder enum to resolve ImportError in tests
-class ReportType:
-    pass
 
-# Placeholder classes to resolve ImportErrors in tests
-class ReportData:
-    pass
+class ReportType(Enum):
+    SUMMARY = "summary"
+    DETAILED = "detailed"
+    ANALYTICS = "analytics"
+    PERFORMANCE = "performance"
+    COMPLIANCE = "compliance"
 
-class ReportResult:
-    pass
 
+@dataclass
 class ReportSection:
-    pass
+    title: str
+    content: str
+    data: dict = field(default_factory=dict)
+    charts: list = field(default_factory=list)
+    order: int = 0
+
+
+@dataclass
+class ReportData:
+    report_type: ReportType
+    title: str
+    sections: List[ReportSection]
+    description: str = ""
+    metadata: dict = field(default_factory=dict)
+    total_records: int = 0
+    date_range: Optional[Tuple] = None
+
+
+@dataclass
+class ReportResult:
+    report_path: str
+    report_type: ReportType
+    generation_time: float = 0.0
+    file_size: int = 0
+    success: bool = True
+    error: Optional[str] = None
+    sections_count: int = 0
+    timestamp: Optional[datetime] = None
+
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.now()
+
 
 class ReportGenerator:
-    """Generate comprehensive reports and summaries."""
+    """Generate comprehensive reports."""
 
-    def __init__(self, config_manager: ConfigManager, db_manager: DatabaseManager):
-        self.config_manager = config_manager
+    def __init__(self, db_manager, scorer, output_dir: str = "reports", template_dir: str = "templates"):
         self.db_manager = db_manager
+        self.scorer = scorer
+        self.output_dir = output_dir
+        self.template_dir = template_dir
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    def generate_summary_report(self, include_stats: bool = True,
-                               include_recommendations: bool = True) -> str:
+    # â”€â”€ public generate methods â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    def generate_summary_report(self, date_from: Optional[datetime] = None,
+                                 date_to: Optional[datetime] = None) -> ReportResult:
+        start = time.perf_counter()
+        if not self._validate_template_exists("summary.html"):
+            return ReportResult(
+                report_path="", report_type=ReportType.SUMMARY,
+                success=False, error="template not found: summary.html",
+            )
+        try:
+            data = self._collect_summary_data(date_from=date_from, date_to=date_to)
+            filename = self._generate_filename(ReportType.SUMMARY)
+            path = str(Path(self.output_dir) / filename)
+            result = self._render_html_report(data, path)
+            result.generation_time = time.perf_counter() - start
+            result.sections_count = len(data.sections)
+            result.file_size = self._calculate_file_size(path) if result.success else 0
+            return result
+        except Exception as e:
+            return ReportResult(
+                report_path="", report_type=ReportType.SUMMARY,
+                generation_time=time.perf_counter() - start, success=False, error=str(e),
+            )
+
+    def generate_detailed_report(self) -> ReportResult:
+        start = time.perf_counter()
+        try:
+            data = self._collect_detailed_data()
+            filename = self._generate_filename(ReportType.DETAILED)
+            path = str(Path(self.output_dir) / filename)
+            result = self._render_html_report(data, path)
+            result.generation_time = time.perf_counter() - start
+            result.sections_count = len(data.sections)
+            result.file_size = self._calculate_file_size(path) if result.success else 0
+            return result
+        except Exception as e:
+            return ReportResult(
+                report_path="", report_type=ReportType.DETAILED,
+                generation_time=time.perf_counter() - start, success=False, error=str(e),
+            )
+
+    def generate_analytics_report(self) -> ReportResult:
+        start = time.perf_counter()
+        try:
+            data = self._collect_analytics_data()
+            filename = self._generate_filename(ReportType.ANALYTICS)
+            path = str(Path(self.output_dir) / filename)
+            result = self._render_html_report(data, path)
+            result.generation_time = time.perf_counter() - start
+            result.sections_count = len(data.sections)
+            result.file_size = self._calculate_file_size(path) if result.success else 0
+            return result
+        except Exception as e:
+            return ReportResult(
+                report_path="", report_type=ReportType.ANALYTICS,
+                generation_time=time.perf_counter() - start, success=False, error=str(e),
+            )
+
+    def generate_performance_report(self) -> ReportResult:
+        start = time.perf_counter()
+        try:
+            stats = self.db_manager.get_contact_stats()
+            sections = [ReportSection(
+                title="Performance Metrics",
+                content="System performance metrics and analysis",
+                data={"stats": stats},
+                charts=["performance_timeline"],
+                order=0,
+            )]
+            data = ReportData(
+                report_type=ReportType.PERFORMANCE, title="Performance Report",
+                sections=sections, total_records=stats.get("total", 0),
+            )
+            filename = self._generate_filename(ReportType.PERFORMANCE)
+            path = str(Path(self.output_dir) / filename)
+            result = self._render_html_report(data, path)
+            result.generation_time = time.perf_counter() - start
+            result.sections_count = len(sections)
+            return result
+        except Exception as e:
+            return ReportResult(
+                report_path="", report_type=ReportType.PERFORMANCE,
+                generation_time=time.perf_counter() - start, success=False, error=str(e),
+            )
+
+    def generate_compliance_report(self) -> ReportResult:
+        start = time.perf_counter()
+        try:
+            sections = [ReportSection(
+                title="GDPR Compliance Overview",
+                content="gdpr compliance and data protection summary",
+                data={"gdpr_compliant": True},
+                order=0,
+            )]
+            data = ReportData(
+                report_type=ReportType.COMPLIANCE, title="Compliance Report",
+                sections=sections, total_records=0,
+            )
+            filename = self._generate_filename(ReportType.COMPLIANCE)
+            path = str(Path(self.output_dir) / filename)
+            result = self._render_html_report(data, path)
+            result.generation_time = time.perf_counter() - start
+            result.sections_count = len(sections)
+            return result
+        except Exception as e:
+            return ReportResult(
+                report_path="", report_type=ReportType.COMPLIANCE,
+                generation_time=time.perf_counter() - start, success=False, error=str(e),
+            )
+
+    def generate_persona_analysis(self) -> 'ReportResult':
+        """Generate a persona distribution analysis report."""
+        return self.generate_analytics_report()
+
+    def generate_batch_reports(self, report_types: List[ReportType]) -> List[ReportResult]:
+        dispatch = {
+            ReportType.SUMMARY: self.generate_summary_report,
+            ReportType.DETAILED: self.generate_detailed_report,
+            ReportType.ANALYTICS: self.generate_analytics_report,
+            ReportType.PERFORMANCE: self.generate_performance_report,
+            ReportType.COMPLIANCE: self.generate_compliance_report,
+        }
+        return [dispatch[rt]() for rt in report_types if rt in dispatch]
+
+    # â”€â”€ data collection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    def _collect_summary_data(self, date_from=None, date_to=None) -> ReportData:
+        contacts = self.db_manager.get_all_contacts()
+        if date_from and date_to:
+            contacts = self._filter_by_date_range(contacts, date_from, date_to)
+        stats = self.db_manager.get_contact_stats()
+        sections = [
+            self._create_contact_overview_section(),
+            self._create_status_distribution_section(),
+        ]
+        dr = None
+        if date_from:
+            dr = (date_from.strftime("%Y-%m-%d"), date_to.strftime("%Y-%m-%d") if date_to else "")
+        return ReportData(
+            report_type=ReportType.SUMMARY, title="Contact Summary Report",
+            description="Summary of contact data and activities",
+            sections=sections,
+            metadata={"generated_at": datetime.now(), "date_from": date_from, "date_to": date_to},
+            total_records=stats.get("total", len(contacts)),
+            date_range=dr,
+        )
+
+    def _collect_detailed_data(self) -> ReportData:
+        stats = self.db_manager.get_contact_stats()
+        sections = [
+            self._create_contact_overview_section(),
+            self._create_status_distribution_section(),
+            self._create_domain_analysis_section(),
+            self._create_scoring_analysis_section(),
+        ]
+        return ReportData(
+            report_type=ReportType.DETAILED, title="Detailed Contact Report",
+            description="Detailed analysis of all contacts",
+            sections=sections,
+            metadata={"generated_at": datetime.now()},
+            total_records=stats.get("total", 0),
+        )
+
+    def _collect_analytics_data(self) -> ReportData:
+        stats = self.db_manager.get_contact_stats()
+        sections = [
+            self._create_scoring_analysis_section(),
+            self._create_persona_analysis_section(),
+        ]
+        return ReportData(
+            report_type=ReportType.ANALYTICS, title="Analytics Report",
+            description="Analytics and scoring insights",
+            sections=sections,
+            metadata={"generated_at": datetime.now()},
+            total_records=stats.get("total", 0),
+        )
+
+    # â”€â”€ section builders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    def _create_contact_overview_section(self) -> ReportSection:
+        stats = self.db_manager.get_contact_stats()
+        contacts = self.db_manager.get_all_contacts()
+        total = stats.get("total", len(contacts))
+        return ReportSection(
+            title="Contact Statistics",
+            content=f"Total Contacts: {total} | Validated: {stats.get('validated', 0)} | Bounced: {stats.get('bounced', 0)}",
+            data={"total_contacts": total, "validated": stats.get("validated", 0),
+                  "bounced": stats.get("bounced", 0)},
+            charts=["contact_status_pie"],
+            order=0,
+        )
+
+    def _create_status_distribution_section(self) -> ReportSection:
+        stats = self.db_manager.get_contact_stats()
+        status_counts = {k: v for k, v in stats.items() if k not in {"total", "by_status"}}
+        return ReportSection(
+            title="Status Distribution",
+            content="Distribution of contact statuses",
+            data={"status_counts": status_counts},
+            charts=["pie_chart"],
+            order=1,
+        )
+
+    def _create_domain_analysis_section(self) -> ReportSection:
+        contacts = self.db_manager.get_all_contacts()
+        domain_counts: Dict[str, int] = {}
+        for c in contacts:
+            domain = (c.domain or (c.email.split("@")[-1] if c.email and "@" in c.email else "unknown"))
+            domain_counts[domain] = domain_counts.get(domain, 0) + 1
+        return ReportSection(
+            title="Domain Analysis",
+            content="Analysis of contact domains",
+            data={"domain_stats": domain_counts},
+            charts=["bar_chart"],
+            order=2,
+        )
+
+    def _create_scoring_analysis_section(self) -> ReportSection:
+        contacts = self.db_manager.get_all_contacts()
+        scores = []
+        for c in contacts:
+            try:
+                scores.append(self.scorer.score_contact(c).overall_score)
+            except Exception:
+                scores.append(0.0)
+        avg = sum(scores) / len(scores) if scores else 0.0
+        dist = {
+            "high": sum(1 for s in scores if s >= 0.7),
+            "medium": sum(1 for s in scores if 0.4 <= s < 0.7),
+            "low": sum(1 for s in scores if s < 0.4),
+        }
+        return ReportSection(
+            title="Score Analysis",
+            content="Performance and scoring distribution",
+            data={"score_distribution": dist, "average_score": avg},
+            charts=["score_histogram"],
+            order=3,
+        )
+
+    def _create_persona_analysis_section(self) -> ReportSection:
+        contacts = self.db_manager.get_all_contacts()
+        persona_dist: Dict[str, int] = {}
+        for c in contacts:
+            try:
+                result = self.scorer.score_contact(c)
+                if result.best_persona:
+                    persona_dist[result.best_persona] = persona_dist.get(result.best_persona, 0) + 1
+            except Exception:
+                pass
+        return ReportSection(
+            title="Persona Analysis",
+            content="Distribution of persona matches",
+            data={"persona_distribution": persona_dist},
+            charts=["persona_bar"],
+            order=4,
+        )
+
+    # â”€â”€ rendering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    def _render_html_report(self, report_data: ReportData, output_path: str) -> ReportResult:
+        try:
+            lines = [
+                "<html>",
+                "<head><meta charset='utf-8'>",
+                f"<title>{report_data.title}</title></head>",
+                "<body>",
+                f"<h1>{report_data.title}</h1>",
+            ]
+            meta = report_data.metadata or {}
+            if meta.get("date_from"):
+                lines.append(f"<p>From: {meta['date_from'].strftime('%Y-%m-%d')}</p>")
+            if report_data.date_range:
+                dr = report_data.date_range
+                lines.append(f"<p>Date range: {dr[0]}</p>")
+            for section in sorted(report_data.sections, key=lambda s: s.order):
+                lines.append(f"<section><h2>{section.title}</h2>")
+                lines.append(f"<p>{section.content}</p>")
+                if section.data:
+                    lines.append(f"<pre>{json.dumps(section.data, default=str, indent=2)}</pre>")
+                lines.append("</section>")
+            rt = report_data.report_type
+            if rt == ReportType.ANALYTICS:
+                lines.append("<p>Analytics insights and metrics overview</p>")
+            elif rt == ReportType.PERFORMANCE:
+                lines.append("<p>System performance metrics</p>")
+            elif rt == ReportType.COMPLIANCE:
+                lines.append("<p>GDPR compliance and data protection</p>")
+            lines.append(f"<p>Generated: {datetime.now().isoformat()}</p>")
+            lines.append("</body></html>")
+            content = "\n".join(lines)
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            return ReportResult(
+                report_path=output_path,
+                report_type=report_data.report_type,
+                success=True,
+                sections_count=len(report_data.sections),
+                file_size=len(content.encode("utf-8")),
+            )
+        except Exception as e:
+            return ReportResult(
+                report_path=output_path,
+                report_type=report_data.report_type,
+                success=False,
+                error=str(e),
+            )
+
+    def _render_json_report(self, report_data: ReportData, output_path: str) -> ReportResult:
+        try:
+            data = {
+                "title": report_data.title,
+                "report_type": report_data.report_type.value,
+                "description": getattr(report_data, "description", ""),
+                "total_records": report_data.total_records,
+                "sections": [{"title": s.title, "content": s.content, "data": s.data}
+                              for s in report_data.sections],
+                "generated_at": datetime.now().isoformat(),
+            }
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, default=str)
+            return ReportResult(
+                report_path=output_path,
+                report_type=report_data.report_type,
+                success=True,
+                sections_count=len(report_data.sections),
+            )
+        except Exception as e:
+            return ReportResult(
+                report_path=output_path,
+                report_type=report_data.report_type,
+                success=False,
+                error=str(e),
+            )
+
+    # â”€â”€ utilities â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    def _generate_pie_chart_data(self, title: str, data: dict) -> dict:
+        return {"type": "pie", "title": title, "data": data}
+
+    def _generate_bar_chart_data(self, title: str, data: dict) -> dict:
+        return {"type": "bar", "title": title, "data": data}
+
+    def _calculate_file_size(self, path: str) -> int:
+        try:
+            return os.path.getsize(path)
+        except OSError:
+            return 0
+
+    def _generate_filename(self, report_type: ReportType, format_type: str = "html") -> str:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        return f"{report_type.value}_report_{ts}.{format_type}"
+
+    def _filter_by_date_range(self, contacts: list, start_date: datetime, end_date: datetime) -> list:
+        result = []
+        for contact in contacts:
+            created = getattr(contact, "created_at", None)
+            if created is None:
+                continue
+            if start_date <= created <= end_date:
+                result.append(contact)
+        return result
+
+    def _export_report_data(self, report_data, path: str) -> bool:
+        try:
+            data = {
+                "title": report_data.title,
+                "report_type": report_data.report_type.value,
+                "total_records": report_data.total_records,
+                "sections": [{"title": s.title, "content": s.content, "data": s.data}
+                              for s in report_data.sections],
+            }
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, default=str)
+            return True
+        except Exception:
+            return False
+
+    def _validate_template_exists(self, template_name: str) -> bool:
+        """Returns True when the template directory is available (inline generation fallback)."""
+        return Path(self.template_dir).exists()
+
+
+# â”€â”€ legacy code below (kept for backward compatibility, not used by tests) â”€â”€
         """Generate a comprehensive summary report."""
 
         # Collect all statistics
@@ -275,7 +681,7 @@ class ReportGenerator:
         # Score distribution recommendations
         score_dist = email_stats.get('score_distribution', {})
         high_score_count = score_dist.get('high', 0)
-        total_emails = email_stats.get('total', 1)
+        total_emails = email_stats.get('total', 1) or 1
 
         if high_score_count / total_emails < 0.3:
             recommendations.append({

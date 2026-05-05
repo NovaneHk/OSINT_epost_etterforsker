@@ -1,5 +1,8 @@
 import { test, expect } from '@playwright/test';
 
+const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? 'admin@localhost';
+const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? 'yNP!X2&g!rshw*)Bk^3V*V!q';
+
 test.describe('Authentication', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
@@ -42,12 +45,12 @@ test.describe('Authentication', () => {
     await page.goto('/login');
 
     // Fill valid credentials (these would be test credentials)
-    await page.fill('input[type="email"]', 'admin@osint.com');
-    await page.fill('input[type="password"]', 'testpassword123');
+    await page.fill('input[type="email"]', ADMIN_EMAIL);
+    await page.fill('input[type="password"]', ADMIN_PASSWORD);
     await page.click('button[type="submit"]');
 
     // Should redirect to dashboard
-    await expect(page).toHaveURL('/dashboard');
+    await expect(page).toHaveURL(/\/dashboard/);
 
     // Should see dashboard content
     await expect(page.locator('h1')).toContainText('Dashboard');
@@ -57,11 +60,11 @@ test.describe('Authentication', () => {
   test('should logout successfully', async ({ page }) => {
     // First login
     await page.goto('/login');
-    await page.fill('input[type="email"]', 'admin@osint.com');
-    await page.fill('input[type="password"]', 'testpassword123');
+    await page.fill('input[type="email"]', ADMIN_EMAIL);
+    await page.fill('input[type="password"]', ADMIN_PASSWORD);
     await page.click('button[type="submit"]');
 
-    await expect(page).toHaveURL('/dashboard');
+    await expect(page).toHaveURL(/\/dashboard/);
 
     // Click user menu and logout
     await page.click('[data-testid="user-menu"]');
@@ -74,17 +77,17 @@ test.describe('Authentication', () => {
   test('should persist authentication across page reloads', async ({ page }) => {
     // Login first
     await page.goto('/login');
-    await page.fill('input[type="email"]', 'admin@osint.com');
-    await page.fill('input[type="password"]', 'testpassword123');
+    await page.fill('input[type="email"]', ADMIN_EMAIL);
+    await page.fill('input[type="password"]', ADMIN_PASSWORD);
     await page.click('button[type="submit"]');
 
-    await expect(page).toHaveURL('/dashboard');
+    await expect(page).toHaveURL(/\/dashboard/);
 
     // Reload page
     await page.reload();
 
     // Should still be authenticated
-    await expect(page).toHaveURL('/dashboard');
+    await expect(page).toHaveURL(/\/dashboard/);
     await expect(page.locator('[data-testid="user-menu"]')).toBeVisible();
   });
 
@@ -96,12 +99,12 @@ test.describe('Authentication', () => {
     await expect(page).toHaveURL(/.*login.*|.*auth.*/);
 
     // Login
-    await page.fill('input[type="email"]', 'admin@osint.com');
-    await page.fill('input[type="password"]', 'testpassword123');
+    await page.fill('input[type="email"]', ADMIN_EMAIL);
+    await page.fill('input[type="password"]', ADMIN_PASSWORD);
     await page.click('button[type="submit"]');
 
     // Should be redirected to originally intended page
-    await expect(page).toHaveURL('/leads');
+    await expect(page).toHaveURL(/\/leads/);
   });
 });
 
@@ -145,7 +148,7 @@ test.describe('Authentication - Registration', () => {
     await expect(page).toHaveURL(/.*register.*|.*signup.*/);
     await expect(page.locator('input[name="name"]')).toBeVisible();
     await expect(page.locator('input[type="email"]')).toBeVisible();
-    await expect(page.locator('input[type="password"]')).toBeVisible();
+    await expect(page.locator('input[name="password"]')).toBeVisible();
     await expect(page.locator('input[name="confirmPassword"]')).toBeVisible();
   });
 
@@ -176,10 +179,11 @@ test.describe('Authentication - Registration', () => {
   test('should register new user successfully', async ({ page }) => {
     await page.goto('/register');
 
+    const uniqueEmail = `testuser${Date.now()}@example.com`;
     await page.fill('input[name="name"]', 'Test User');
-    await page.fill('input[type="email"]', 'newuser@example.com');
-    await page.fill('input[type="password"]', 'password123');
-    await page.fill('input[name="confirmPassword"]', 'password123');
+    await page.fill('input[type="email"]', uniqueEmail);
+    await page.fill('input[name="password"]', 'Password123!');
+    await page.fill('input[name="confirmPassword"]', 'Password123!');
 
     await page.click('button[type="submit"]');
 

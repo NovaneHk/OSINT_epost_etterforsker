@@ -1,9 +1,6 @@
-"""
-OSINT E-post Etterforsker - Exports API Endpoints
-Data export management and file generation endpoints
-"""
+﻿"""Data export management endpoints."""
 
-from typing import Annotated, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 from datetime import datetime
 import io
 import csv
@@ -31,6 +28,94 @@ from backend.repositories.export import ExportRepository
 
 
 router = APIRouter(prefix="/exports", tags=["Exports"])
+
+
+def _get_export_rows(db: DatabaseSession, query: str, params: tuple[Any, ...] = ()) -> List[Dict[str, Any]]:
+    return db.execute_query(query, params)
+
+
+def _count_exports(db: DatabaseSession, conditions: str = "", params: tuple[Any, ...] = ()) -> int:
+    query = "SELECT COUNT(*) AS total FROM exports"
+    if conditions:
+        query += f" WHERE {conditions}"
+    rows = db.execute_query(query, params)
+    return int(rows[0]["total"]) if rows else 0
+
+
+def _map_export_format(value: Optional[str]) -> ExportFormat:
+    mapping = {
+        "csv": ExportFormat.CSV,
+        "xlsx": ExportFormat.XLSX,
+        "json": ExportFormat.JSON,
+        "pdf": ExportFormat.PDF,
+        "xml": ExportFormat.XML,
+        "maltego": ExportFormat.MALTEGO,
+        "mtgl": ExportFormat.MALTEGO,
+    }
+    return mapping.get((value or "").lower(), ExportFormat.CSV)
+
+
+def _serialize_export(row: Dict[str, Any]) -> ExportResponse:
+    filters = row.get("filters")
+    if isinstance(filters, str):
+        try:
+            filters = json.loads(filters)
+        except json.JSONDecodeError:
+            filters = None
+
+    status = ExportStatus(row.get("status", ExportStatus.PENDING.value))
+    progress_percentage = float(row.get("progress", 0.0) or 0.0)
+
+    return ExportResponse(
+        id=str(row["id"]),
+        name=row["name"],
+        description=row.get("description"),
+        format=_map_export_format(row.get("type") or row.get("format")),
+        entity_type=str(row.get("entity_type") or "leads"),
+        filters=filters,
+        columns=None,
+        campaign_id=None,
+        status=status,
+        total_records=row.get("leads_count") or row.get("total_records"),
+        processed_records=int(row.get("leads_count", 0) or 0),
+        file_size=row.get("file_size"),
+        file_url=row.get("file_path") or row.get("file_url"),
+        started_at=row.get("started_at"),
+        completed_at=row.get("completed_at"),
+        expires_at=row.get("expires_at"),
+        error_message=row.get("error_message"),
+        download_count=int(row.get("download_count", 0) or 0),
+        last_downloaded=row.get("last_downloaded"),
+        progress_percentage=progress_percentage,
+        is_expired=status == ExportStatus.EXPIRED,
+        is_downloadable=status == ExportStatus.COMPLETED and bool(row.get("file_path") or row.get("file_url")),
+        created_by=str(row.get("created_by") or "system"),
+        created_at=row.get("created_at") or datetime.utcnow(),
+        updated_at=row.get("updated_at") or datetime.utcnow(),
+    )
+
+
+def _build_export_filters(
+    export_type: Optional[str] = None,
+    status: Optional[str] = None,
+    created_by: Optional[str] = None,
+) -> tuple[str, tuple[Any, ...]]:
+    conditions: List[str] = []
+    params: List[Any] = []
+
+    if export_type:
+        conditions.append("type = ?")
+        params.append(export_type)
+
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
+
+    if created_by:
+        conditions.append("created_by = ?")
+        params.append(created_by)
+
+    return " AND ".join(conditions), tuple(params)
 
 
 class ExportProcessRequest(BaseModel):
@@ -63,32 +148,24 @@ async def list_exports(
     List data exports with pagination and filtering.
     Supports filtering by type, status, and creator.
     """
-    export_repo = ExportRepository(db)
-
-    # Build filters
-    filters = {}
-    if export_type:
-        filters["export_type"] = export_type.value
-    if status:
-        filters["status"] = status.value
-    if created_by:
-        filters["created_by"] = created_by
-
-    # Get paginated results
-    result = await export_repo.get_paginated(
-        page=common.pagination["page"],
-        size=common.pagination["size"],
-        filters=filters,
-        order_by=common.search["sort"],
-        order_direction=common.search["order"]
+    conditions, params = _build_export_filters(
+        export_type=export_type.value if export_type else None,
+        status=status.value if status else None,
+        created_by=created_by,
+    )
+    total = _count_exports(db, conditions, params)
+    exports = _get_export_rows(
+        db,
+        f"SELECT * FROM exports{' WHERE ' + conditions if conditions else ''} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        params + (common.pagination["size"], common.pagination["offset"]),
     )
 
     return ExportListResponse(
-        exports=[ExportResponse.from_orm(export) for export in result["records"]],
-        total=result["total"],
-        page=result["page"],
-        size=result["size"],
-        pages=result["pages"]
+        exports=[_serialize_export(export) for export in exports],
+        total=total,
+        page=common.pagination["page"],
+        size=common.pagination["size"],
+        pages=(total + common.pagination["size"] - 1) // common.pagination["size"] if total else 0,
     )
 
 
@@ -104,8 +181,25 @@ async def get_export_statistics(
     """
     Get comprehensive export statistics including usage, status distribution, and file metrics.
     """
-    export_repo = ExportRepository(db)
-    return await export_repo.get_export_statistics()
+    exports = [_serialize_export(row) for row in _get_export_rows(db, "SELECT * FROM exports")]
+    popular_formats: Dict[str, int] = {}
+    exports_by_entity_type: Dict[str, int] = {}
+
+    for export in exports:
+        popular_formats[export.format.value] = popular_formats.get(export.format.value, 0) + 1
+        exports_by_entity_type[export.entity_type] = exports_by_entity_type.get(export.entity_type, 0) + 1
+
+    return {
+        "total_exports": len(exports),
+        "pending_exports": sum(1 for export in exports if export.status == ExportStatus.PENDING),
+        "processing_exports": sum(1 for export in exports if export.status == ExportStatus.PROCESSING),
+        "completed_exports": sum(1 for export in exports if export.status == ExportStatus.COMPLETED),
+        "failed_exports": sum(1 for export in exports if export.status == ExportStatus.FAILED),
+        "total_downloads": sum(export.download_count for export in exports),
+        "popular_formats": popular_formats,
+        "average_file_size": sum((export.file_size or 0) for export in exports) / len(exports) if exports else 0.0,
+        "exports_by_entity_type": exports_by_entity_type,
+    }
 
 
 @router.get(
@@ -126,7 +220,7 @@ async def get_recent_exports(
     exports = await export_repo.get_recent_exports(limit=limit)
 
     return ExportListResponse(
-        exports=[ExportResponse.from_orm(export) for export in exports],
+        exports=[ExportResponse.model_validate(export) for export in exports],
         total=len(exports),
         page=1,
         size=limit,
@@ -161,7 +255,7 @@ async def create_export(
         )
 
     # Set creator
-    export_data_dict = export_data.dict()
+    export_data_dict = export_data.model_dump()
     export_data_dict["created_by"] = current_user.id
 
     export = await export_repo.create(ExportCreate(**export_data_dict))
@@ -169,7 +263,7 @@ async def create_export(
     # Schedule background processing
     background_tasks.add_task(process_export_background, export.id, db)
 
-    return ExportResponse.from_orm(export)
+    return ExportResponse.model_validate(export)
 
 
 @router.get(
@@ -202,7 +296,7 @@ async def get_export(
             detail="Access denied"
         )
 
-    return ExportResponse.from_orm(export)
+    return ExportResponse.model_validate(export)
 
 
 @router.put(
@@ -245,7 +339,7 @@ async def update_export(
         )
 
     # Check name uniqueness if being updated
-    update_data = export_update.dict(exclude_unset=True)
+    update_data = export_update.model_dump(exclude_unset=True)
     if "name" in update_data:
         if await export_repo.name_exists_for_user(
             update_data["name"],
@@ -258,7 +352,7 @@ async def update_export(
             )
 
     updated_export = await export_repo.update(export, update_data)
-    return ExportResponse.from_orm(updated_export)
+    return ExportResponse.model_validate(updated_export)
 
 
 @router.delete(
@@ -345,7 +439,7 @@ async def process_export(
     background_tasks.add_task(process_export_background, export_id, db)
 
     updated_export = await export_repo.get_by_id(export_id)
-    return ExportResponse.from_orm(updated_export)
+    return ExportResponse.model_validate(updated_export)
 
 
 @router.get(
@@ -472,7 +566,7 @@ async def get_exports_by_status(
     total = await export_repo.count(filters={"status": status.value})
 
     return ExportListResponse(
-        exports=[ExportResponse.from_orm(export) for export in exports],
+        exports=[ExportResponse.model_validate(export) for export in exports],
         total=total,
         page=page,
         size=size,
@@ -503,7 +597,7 @@ async def get_exports_by_type(
     total = await export_repo.count(filters={"export_type": export_type.value})
 
     return ExportListResponse(
-        exports=[ExportResponse.from_orm(export) for export in exports],
+        exports=[ExportResponse.model_validate(export) for export in exports],
         total=total,
         page=page,
         size=size,
@@ -542,7 +636,7 @@ async def get_user_exports(
     total = await export_repo.count(filters={"created_by": user_id})
 
     return ExportListResponse(
-        exports=[ExportResponse.from_orm(export) for export in exports],
+        exports=[ExportResponse.model_validate(export) for export in exports],
         total=total,
         page=page,
         size=size,
@@ -636,30 +730,47 @@ async def generate_export_content(export: Export, db):
     """
     Generate export file content based on export type.
     """
-    # Mock data generation - replace with actual data fetching
-    mock_data = [
+    export_format = getattr(export, "export_type", None) or getattr(export, "format", None)
+
+    rows = db.execute_query(
+        "SELECT id, email, name, role, company, domain, status, "
+        "confidence_score, overall_score, persona_match, source, extracted_at "
+        "FROM contacts ORDER BY extracted_at DESC"
+    )
+    data = [
         {
-            "id": f"lead_{i}",
-            "email": f"contact{i}@example.com",
-            "name": f"Contact {i}",
-            "company": f"Company {i}",
-            "created_at": datetime.utcnow().isoformat()
+            "id": str(r.get("id", "")),
+            "email": r.get("email", ""),
+            "name": r.get("name", ""),
+            "role": r.get("role", ""),
+            "company": r.get("company", ""),
+            "domain": r.get("domain", ""),
+            "status": r.get("status", ""),
+            "confidence_score": r.get("confidence_score", 0),
+            "overall_score": r.get("overall_score", 0),
+            "persona_match": r.get("persona_match", ""),
+            "source": r.get("source", ""),
+            "extracted_at": str(r.get("extracted_at", "")),
         }
-        for i in range(1, 101)
+        for r in rows
     ]
 
-    if export.export_type == ExportFormat.CSV:
-        content = generate_csv_content(mock_data)
+    if export_format == ExportFormat.CSV or export_format == ExportFormat.CSV.value:
+        content = generate_csv_content(data)
         media_type = "text/csv"
         filename = f"{export.name}.csv"
-    elif export.export_type == ExportFormat.JSON:
-        content = json.dumps(mock_data, indent=2).encode('utf-8')
+    elif export_format == ExportFormat.JSON or export_format == ExportFormat.JSON.value:
+        content = json.dumps(data, indent=2).encode('utf-8')
         media_type = "application/json"
         filename = f"{export.name}.json"
-    elif export.export_type == ExportFormat.XLSX:
-        content = generate_excel_content(mock_data)
+    elif export_format == ExportFormat.XLSX or export_format == ExportFormat.XLSX.value:
+        content = generate_excel_content(data)
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         filename = f"{export.name}.xlsx"
+    elif export_format == ExportFormat.MALTEGO or export_format == ExportFormat.MALTEGO.value:
+        content = generate_maltego_content(data)
+        media_type = "application/xml"
+        filename = f"{export.name}.mtgl"
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -667,6 +778,40 @@ async def generate_export_content(export: Export, db):
         )
 
     return content, media_type, filename
+
+
+def generate_maltego_content(data: List[dict]) -> bytes:
+    """Generate Maltego-compatible XML (.mtgl) from contacts data."""
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<MaltegoMessage>',
+        '  <MaltegoTransformResponseMessage>',
+        '    <Entities>',
+    ]
+    for row in data:
+        email = row.get("email", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        name = row.get("name", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        company = row.get("company", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        role = row.get("role", "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        if not email:
+            continue
+        lines += [
+            '      <Entity Type="maltego.EmailAddress">',
+            f'        <Value>{email}</Value>',
+            '        <AdditionalFields>',
+            f'          <Field Name="person.fullname" DisplayName="Full Name">{name}</Field>',
+            f'          <Field Name="company.name" DisplayName="Company">{company}</Field>',
+            f'          <Field Name="person.jobtitle" DisplayName="Role">{role}</Field>',
+            f'          <Field Name="confidence" DisplayName="Confidence">{row.get("confidence_score", 0)}</Field>',
+            '        </AdditionalFields>',
+            '      </Entity>',
+        ]
+    lines += [
+        '    </Entities>',
+        '  </MaltegoTransformResponseMessage>',
+        '</MaltegoMessage>',
+    ]
+    return '\n'.join(lines).encode('utf-8')
 
 
 def generate_csv_content(data: List[dict]) -> bytes:
@@ -685,23 +830,38 @@ def generate_csv_content(data: List[dict]) -> bytes:
 
 
 def generate_excel_content(data: List[dict]) -> bytes:
-    """Generate Excel content from data."""
-    # Mock Excel generation - in reality, use pandas or openpyxl
-    csv_content = generate_csv_content(data)
-    return csv_content  # Simplified for demo
+    """Generate Excel content from data using openpyxl."""
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    if data:
+        ws.append(list(data[0].keys()))
+        for row in data:
+            ws.append([row.get(k) for k in data[0].keys()])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 
 async def generate_export_preview(export: Export, limit: int, db):
     """
     Generate preview data for export.
     """
-    # Mock preview data
+    rows = db.execute_query(
+        "SELECT id, email, name, role, company, domain, status, confidence_score "
+        "FROM contacts ORDER BY extracted_at DESC LIMIT ?",
+        (limit,)
+    )
     return [
         {
-            "id": f"lead_{i}",
-            "email": f"preview{i}@example.com",
-            "name": f"Preview Contact {i}",
-            "company": f"Preview Company {i}"
+            "id": str(r.get("id", "")),
+            "email": r.get("email", ""),
+            "name": r.get("name", ""),
+            "role": r.get("role", ""),
+            "company": r.get("company", ""),
+            "domain": r.get("domain", ""),
+            "status": r.get("status", ""),
+            "confidence_score": r.get("confidence_score", 0),
         }
-        for i in range(1, min(limit + 1, 11))
+        for r in rows
     ]

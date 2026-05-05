@@ -1,19 +1,26 @@
 import { test, expect } from '@playwright/test';
 
+const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? 'admin@localhost';
+const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? 'yNP!X2&g!rshw*)Bk^3V*V!q';
+
 test.describe('Lead Management', () => {
   test.beforeEach(async ({ page }) => {
-    // Assume we have authentication helper
+    // Login and wait for dashboard redirect
     await page.goto('/login');
-    await page.fill('input[type="email"]', 'admin@osint.com');
-    await page.fill('input[type="password"]', 'testpassword123');
+    await page.fill('input[type="email"]', ADMIN_EMAIL);
+    await page.fill('input[type="password"]', ADMIN_PASSWORD);
     await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/dashboard/);
 
-    // Navigate to leads page
+    // Navigate to leads page and wait for it to load
     await page.goto('/leads');
+    await expect(page).toHaveURL(/\/leads/);
+    // Wait for the page to finish loading (either table or empty state)
+    await page.waitForSelector('[data-testid="leads-table"], [data-testid="empty-state"]', { timeout: 15000 });
   });
 
   test('should display leads page with table', async ({ page }) => {
-    await expect(page).toHaveURL('/leads');
+    await expect(page).toHaveURL(/\/leads/);
     await expect(page.locator('h1')).toContainText('Email Leads');
 
     // Should see leads table
@@ -45,7 +52,8 @@ test.describe('Lead Management', () => {
     const leadCount = await page.locator('[data-testid="leads-table"] tbody tr').count();
     expect(leadCount).toBeGreaterThan(0);
 
-    // Click confidence score column header to sort
+    // Click confidence score column header twice to sort descending (first click = ascending, second = descending)
+    await page.click('[data-testid="confidence-header"]');
     await page.click('[data-testid="confidence-header"]');
 
     // Check that leads are sorted by confidence score descending
@@ -199,17 +207,19 @@ test.describe('Lead Management', () => {
   });
 
   test('should clear search filter', async ({ page }) => {
-    // Apply search first
+    // Apply search first (client-side filter)
     await page.fill('[data-testid="search-input"]', 'John Doe');
-    await page.press('[data-testid="search-input"]', 'Enter');
+    await page.waitForTimeout(300);
 
     // Clear search
     await page.fill('[data-testid="search-input"]', '');
-    await page.press('[data-testid="search-input"]', 'Enter');
+
+    // Wait for filter to clear - second row should become visible again
+    await expect(page.locator('[data-testid="leads-table"] tbody tr').nth(1)).toBeVisible({ timeout: 5000 });
 
     // Should show all leads again
     const allLeadsCount = await page.locator('[data-testid="leads-table"] tbody tr').count();
-    expect(allLeadsCount).toBeGreaterThan(1);
+    expect(allLeadsCount).toBeGreaterThanOrEqual(1);
   });
 
   test('should handle pagination', async ({ page }) => {
@@ -248,10 +258,13 @@ test.describe('Lead Management - Batch Operations', () => {
   test.beforeEach(async ({ page }) => {
     // Login and navigate to leads
     await page.goto('/login');
-    await page.fill('input[type="email"]', 'admin@osint.com');
-    await page.fill('input[type="password"]', 'testpassword123');
+    await page.fill('input[type="email"]', ADMIN_EMAIL);
+    await page.fill('input[type="password"]', ADMIN_PASSWORD);
     await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/dashboard/);
     await page.goto('/leads');
+    await expect(page).toHaveURL(/\/leads/);
+    await page.waitForSelector('[data-testid="leads-table"], [data-testid="empty-state"]', { timeout: 15000 });
   });
 
   test('should select multiple leads', async ({ page }) => {

@@ -1,5 +1,12 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// E2E test credentials — read from environment or use defaults matching .env.production
+const TEST_EMAIL = process.env.E2E_ADMIN_EMAIL ?? 'admin@localhost';
+const TEST_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? 'yNP!X2&g!rshw*)Bk^3V*V!q';
+
+// Export for use in test files
+export { TEST_EMAIL, TEST_PASSWORD };
+
 /**
  * @see https://playwright.dev/docs/test-configuration
  */

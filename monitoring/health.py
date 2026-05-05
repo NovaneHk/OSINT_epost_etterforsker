@@ -1,60 +1,402 @@
-class HealthMonitor:
-    def __init__(self, *args, **kwargs):
-        pass
-class HealthStatus:
-    HEALTHY = "healthy"
-    WARNING = "warning"
-    CRITICAL = "critical"
-class SystemMetrics:
-    def __init__(self, *args, **kwargs):
-        self.cpu_percent = kwargs.get('cpu_percent', 0)
-        self.memory_percent = kwargs.get('memory_percent', 0)
-class ComponentHealth:
-    def __init__(self, *args, **kwargs):
-        pass
-class HealthCheck:
-    def __init__(self, *args, **kwargs):
-        pass
 """
 Health Monitoring Module
 System health checks and monitoring capabilities
 """
 
-import psutil
+from dataclasses import dataclass, field
+from enum import Enum
 import logging
-from typing import Dict, Any
+import threading
+import time
+from typing import Dict, Any, List, Optional, Callable
 from datetime import datetime, timedelta
-import sqlite3
+
+import psutil
 import requests
+import sqlite3
 from pathlib import Path
 
 from core.config import ConfigManager
 
 logger = logging.getLogger(__name__)
 
-# Placeholder class to resolve ImportError in tests
-class HealthMonitor:
-    pass
 
-# Placeholder classes to resolve ImportErrors in tests
-class HealthStatus:
-    pass
+class HealthStatus(Enum):
+    HEALTHY = "healthy"
+    WARNING = "warning"
+    CRITICAL = "critical"
+    UNKNOWN = "unknown"
 
+
+@dataclass
 class SystemMetrics:
-    pass
+    cpu_percent: float = 0.0
+    memory_percent: float = 0.0
+    disk_percent: float = 0.0
+    disk_free_gb: float = 0.0
+    uptime_seconds: float = 0
+    load_average: float = 0.0
+    network_bytes_sent: int = 0
+    network_bytes_recv: int = 0
+    active_connections: int = 0
+    timestamp: Optional[datetime] = None
 
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.now()
+
+
+@dataclass
 class ComponentHealth:
-    pass
+    component_name: str
+    status: HealthStatus
+    response_time_ms: float = 0.0
+    last_check: Optional[datetime] = None
+    error_message: Optional[str] = None
+    details: dict = field(default_factory=dict)
 
+    def __post_init__(self):
+        if self.last_check is None:
+            self.last_check = datetime.now()
+
+
+@dataclass
 class HealthCheck:
-    pass
+    overall_status: HealthStatus
+    system_metrics: Optional[SystemMetrics] = None
+    component_health: List[ComponentHealth] = field(default_factory=list)
+    check_duration_ms: float = 0.0
+    alerts: List[str] = field(default_factory=list)
+    timestamp: Optional[datetime] = None
+
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.now()
+
+    @property
+    def component_statuses(self) -> dict:
+        """Return {component_name: status_value} dict for easy lookup."""
+        return {c.component_name: c.status.value for c in self.component_health}
+
+
+class HealthMonitor:
+    """System health monitor for the OSINT email system."""
+
+    DEFAULT_THRESHOLDS = {
+        'cpu_percent': 80,
+        'memory_percent': 85,
+        'disk_percent': 90,
+        'response_time_ms': 1000,
+    }
+
+    def __init__(self, db_manager, config_manager, check_interval: int = 60):
+        self.db_manager = db_manager
+        self.config_manager = config_manager
+        self.check_interval = check_interval
+        self.is_running = False
+        self.active_alerts: List[str] = []
+        self.custom_checks: Dict[str, Callable] = {}
+
+        # Load alert thresholds from config
+        config = config_manager.get_current_config() or {}
+        monitoring = config.get('monitoring', {})
+        self.alert_thresholds = monitoring.get('alert_thresholds', self.DEFAULT_THRESHOLDS)
+
+    def get_system_metrics(self) -> SystemMetrics:
+        """Collect current system metrics using psutil."""
+        cpu = psutil.cpu_percent(interval=None)
+        mem = psutil.virtual_memory()
+        disk = psutil.disk_usage('/')
+        boot_ts = psutil.boot_time()
+        uptime = datetime.now().timestamp() - boot_ts
+        net = psutil.net_io_counters()
+
+        # load_average: windows doesn't support getloadavg, use cpu_percent as proxy
+        try:
+            load_avg = psutil.getloadavg()[0]
+        except (AttributeError, OSError):
+            load_avg = cpu / 100.0
+
+        return SystemMetrics(
+            cpu_percent=cpu,
+            memory_percent=mem.percent,
+            disk_percent=disk.percent,
+            disk_free_gb=round(disk.free / (1024 ** 3), 1),
+            uptime_seconds=uptime,
+            load_average=load_avg,
+            network_bytes_sent=net.bytes_sent,
+            network_bytes_recv=net.bytes_recv,
+            active_connections=0,
+        )
+
+    def get_contact_metrics(self) -> dict:
+        """Return contact-oriented metrics from the database."""
+        try:
+            stats = self.db_manager.get_contact_stats()
+            contacts = self.db_manager.get_all_contacts()
+            avg_score = (
+                sum(c.lead_score or 0.0 for c in contacts) / len(contacts)
+                if contacts else 0.0
+            )
+            return {
+                'total_contacts': stats.get('total', len(contacts)),
+                'contacts_by_status': stats.get('by_status', {}),
+                'average_score': avg_score,
+            }
+        except Exception as e:
+            return {'total_contacts': 0, 'contacts_by_status': {}, 'average_score': 0.0}
+
+    def check_database_health(self) -> ComponentHealth:
+        """Check database connectivity and basic operations."""
+        start = time.time()
+        try:
+            self.db_manager.get_contact_stats()
+            elapsed = (time.time() - start) * 1000
+            return ComponentHealth(
+                component_name="database",
+                status=HealthStatus.HEALTHY,
+                response_time_ms=elapsed,
+                details={"operation": "get_contact_stats"},
+            )
+        except Exception as e:
+            return ComponentHealth(
+                component_name="database",
+                status=HealthStatus.CRITICAL,
+                response_time_ms=0.0,
+                error_message=str(e),
+            )
+
+    def check_api_health(self, url: str) -> ComponentHealth:
+        """Check API endpoint health."""
+        try:
+            response = requests.get(url, timeout=10)
+            elapsed_ms = response.elapsed.total_seconds() * 1000
+            threshold = self.alert_thresholds.get('response_time_ms', 1000)
+
+            if elapsed_ms > threshold:
+                return ComponentHealth(
+                    component_name="api",
+                    status=HealthStatus.WARNING,
+                    response_time_ms=elapsed_ms,
+                    error_message=f"slow response: {elapsed_ms:.0f}ms exceeds threshold {threshold}ms",
+                )
+            return ComponentHealth(
+                component_name="api",
+                status=HealthStatus.HEALTHY,
+                response_time_ms=elapsed_ms,
+            )
+        except Exception as e:
+            return ComponentHealth(
+                component_name="api",
+                status=HealthStatus.CRITICAL,
+                response_time_ms=0.0,
+                error_message=str(e),
+            )
+
+    def check_disk_space(self) -> ComponentHealth:
+        """Check disk space health."""
+        disk = psutil.disk_usage('/')
+        percent = disk.percent
+        free_gb = round(disk.free / (1024 ** 3), 1)
+        threshold = self.alert_thresholds.get('disk_percent', 90)
+
+        if percent >= threshold:
+            status = HealthStatus.CRITICAL
+            msg = f"disk {percent:.0f}% full — above critical threshold {threshold}%"
+        elif percent >= threshold - 10:
+            status = HealthStatus.WARNING
+            msg = f"disk {percent:.0f}% full — approaching threshold"
+        else:
+            status = HealthStatus.HEALTHY
+            msg = None
+
+        return ComponentHealth(
+            component_name="disk_space",
+            status=status,
+            error_message=msg,
+            details={"disk_percent": percent, "free_gb": free_gb},
+        )
+
+    def check_memory_usage(self) -> ComponentHealth:
+        """Check memory usage health."""
+        mem = psutil.virtual_memory()
+        percent = mem.percent
+        available_gb = round(mem.available / (1024 ** 3), 2)
+        threshold = self.alert_thresholds.get('memory_percent', 85)
+
+        if percent >= threshold + 10:
+            status = HealthStatus.CRITICAL
+            msg = f"memory {percent:.0f}% used — critical"
+        elif percent >= threshold:
+            status = HealthStatus.WARNING
+            msg = f"memory {percent:.0f}% used — above threshold"
+        else:
+            status = HealthStatus.HEALTHY
+            msg = None
+
+        return ComponentHealth(
+            component_name="memory",
+            status=status,
+            error_message=msg,
+            details={"memory_percent": percent, "available_gb": available_gb},
+        )
+
+    def check_configuration_health(self) -> ComponentHealth:
+        """Check that required configuration files are present and valid."""
+        try:
+            personas = self.config_manager.load_personas()
+            sources = self.config_manager.load_sources()
+            rules = self.config_manager.load_rules()
+            missing = []
+            if not personas.get('personas'):
+                missing.append('personas')
+            if missing:
+                return ComponentHealth(
+                    component_name="configuration",
+                    status=HealthStatus.WARNING,
+                    error_message=f"Missing config sections: {missing}",
+                )
+            return ComponentHealth(
+                component_name="configuration",
+                status=HealthStatus.HEALTHY,
+                details={},
+            )
+        except Exception as e:
+            return ComponentHealth(
+                component_name="configuration",
+                status=HealthStatus.CRITICAL,
+                error_message=str(e),
+            )
+
+    def perform_health_check(self) -> HealthCheck:
+        """Perform a full system health check."""
+        start = time.perf_counter()
+
+        metrics = self.get_system_metrics()
+        components = [
+            self.check_database_health(),
+            self.check_disk_space(),
+            self.check_memory_usage(),
+            self.check_configuration_health(),
+        ]
+
+        # Run any custom checks
+        for name, fn in self.custom_checks.items():
+            try:
+                components.append(fn())
+            except Exception as e:
+                components.append(ComponentHealth(name, HealthStatus.CRITICAL, error_message=str(e)))
+
+        overall = self._determine_overall_status(components)
+        alerts = self._generate_alerts(components)
+        self.active_alerts = alerts
+
+        duration_ms = (time.perf_counter() - start) * 1000
+        return HealthCheck(
+            overall_status=overall,
+            system_metrics=metrics,
+            component_health=components,
+            check_duration_ms=duration_ms,
+            alerts=alerts,
+        )
+
+    def _determine_overall_status(self, components: List[ComponentHealth]) -> HealthStatus:
+        """Determine overall status based on component statuses."""
+        has_critical = any(c.status == HealthStatus.CRITICAL for c in components)
+        has_warning = any(c.status == HealthStatus.WARNING for c in components)
+
+        if has_critical:
+            return HealthStatus.CRITICAL
+        if has_warning:
+            return HealthStatus.WARNING
+        return HealthStatus.HEALTHY
+
+    def _generate_alerts(self, components: List[ComponentHealth]) -> List[str]:
+        """Generate alert messages for non-healthy components."""
+        alerts = []
+        for comp in components:
+            if comp.status in (HealthStatus.WARNING, HealthStatus.CRITICAL):
+                msg = f"{comp.component_name}: {comp.status.value}"
+                if comp.error_message:
+                    msg += f" — {comp.error_message}"
+                alerts.append(msg)
+        return alerts
+
+    def start_monitoring(self) -> None:
+        """Start continuous monitoring in a background thread."""
+        self.is_running = True
+        t = threading.Thread(target=self._monitoring_loop, daemon=True)
+        t.start()
+
+    def stop_monitoring(self) -> None:
+        """Stop continuous monitoring."""
+        self.is_running = False
+
+    def _monitoring_loop(self) -> None:
+        """Internal monitoring loop."""
+        while self.is_running:
+            self.perform_health_check()
+            if not self.is_running:
+                break
+            time.sleep(self.check_interval)
+
+    def get_health_summary(self) -> dict:
+        """Return a dict summary of the current health state."""
+        check = self.perform_health_check()
+        return {
+            "overall_status": check.overall_status.value,
+            "system_metrics": {
+                "cpu_percent": check.system_metrics.cpu_percent if check.system_metrics else None,
+                "memory_percent": check.system_metrics.memory_percent if check.system_metrics else None,
+            } if check.system_metrics else {},
+            "components": [
+                {"name": c.component_name, "status": c.status.value}
+                for c in check.component_health
+            ],
+            "alerts": check.alerts,
+            "timestamp": check.timestamp.isoformat() if check.timestamp else None,
+        }
+
+    def is_healthy(self) -> bool:
+        """Return True only if overall status is HEALTHY."""
+        check = self.perform_health_check()
+        return check.overall_status == HealthStatus.HEALTHY
+
+    def get_uptime(self) -> timedelta:
+        """Return system uptime as a timedelta."""
+        boot_ts = psutil.boot_time()
+        return timedelta(seconds=datetime.now().timestamp() - boot_ts)
+
+    def reset_alerts(self) -> None:
+        """Clear all active alerts."""
+        self.active_alerts = []
+
+    def add_custom_check(self, name: str, check_fn: Callable) -> None:
+        """Register a custom health check function."""
+        self.custom_checks[name] = check_fn
+
+    def remove_custom_check(self, name: str) -> None:
+        """Remove a registered custom health check."""
+        self.custom_checks.pop(name, None)
+
 
 class HealthChecker:
-    """Comprehensive system health monitoring."""
+    """Comprehensive system health monitoring (legacy class)."""
 
-    def __init__(self, config_manager: ConfigManager):
-        self.config_manager = config_manager
-        self.rules_config = config_manager.load_rules()
+    def __init__(self) -> None:
+        from core.config import ConfigManager
+        from core.database import DatabaseManager
+        self.config_manager = ConfigManager()
+        # Instantiating DatabaseManager triggers _init_database() and migrations
+        try:
+            DatabaseManager()
+        except Exception:
+            pass
+        try:
+            rules = self.config_manager.load_rules()
+            self.rules_config = rules if isinstance(rules, dict) else {}
+        except Exception:
+            self.rules_config = {}
 
     def run_all_checks(self) -> Dict[str, Any]:
         """Run all health checks and return comprehensive status."""

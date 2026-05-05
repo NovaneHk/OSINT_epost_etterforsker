@@ -4,6 +4,7 @@ Repository for managing search run data operations
 """
 
 from typing import Dict, List, Optional, Any
+from collections import Counter
 from datetime import datetime, timedelta
 from sqlalchemy import and_, or_, desc, asc, func
 from sqlalchemy.orm import Session
@@ -201,7 +202,7 @@ class SearchRunRepository(BaseRepository[SearchRun, SearchRunCreate, SearchRunUp
             "total_results_found": total_results,
             "runs_by_type": type_dict,
             "success_rate": success_rate,
-            "most_used_sources": []  # TODO: Implement based on actual usage
+            "most_used_sources": self._aggregate_most_used_sources(completed_runs),
         }
 
     async def get_run_progress(self, run_id: str) -> Dict[str, Any]:
@@ -214,11 +215,19 @@ class SearchRunRepository(BaseRepository[SearchRun, SearchRunCreate, SearchRunUp
             "current_step": run.current_step,
             "total_steps": run.total_steps,
             "message": f"Processing step: {run.current_step}" if run.current_step else None,
-            "sources_processed": 0,  # TODO: Implement based on actual processing
+            "sources_processed": len(run.sources) if run.sources else 0,
             "estimated_completion": run.estimated_completion
         }
 
         return progress_data
+
+    def _aggregate_most_used_sources(self, runs: List[SearchRun], top_n: int = 5) -> List[Dict[str, Any]]:
+        """Count source occurrences across completed runs."""
+        counter: Counter = Counter()
+        for run in runs:
+            if run.sources:
+                counter.update(run.sources)
+        return [{"source": src, "count": cnt} for src, cnt in counter.most_common(top_n)]
 
     async def get_run_results(self, run_id: str, page: int = 1, size: int = 20) -> Dict[str, Any]:
         """Get results for a specific run"""

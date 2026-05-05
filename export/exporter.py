@@ -17,6 +17,7 @@ class ExportFormat(Enum):
     EXCEL = "excel"
     XML = "xml"
     XLSX = "xlsx"  # Alias for test compatibility
+    MALTEGO = "maltego"
 
 class ExportResult:
     def __init__(self, file_path=None, format=None, total_records=0, filtered_records=0, file_size=0, export_time=0.0, success=True, error=None, timestamp=None, **kwargs):
@@ -58,7 +59,7 @@ class DataExporter:
         self.default_columns = [
             'email', 'name', 'role', 'company', 'status',
             'domain', 'sector', 'confidence_score',
-            'overall_score', 'confidence', 'best_persona'
+            'overall_score', 'confidence', 'persona_match'
         ]
 
     # --------------- Public export methods ---------------
@@ -105,7 +106,7 @@ class DataExporter:
 
             payload = {
                 'contacts': data_rows,
-                'metadata': {
+                'export_metadata': {
                     'export_date': datetime.now().isoformat(),
                     'total_records': len(contacts),
                     'filtered_records': len(filtered),
@@ -159,6 +160,10 @@ class DataExporter:
         except Exception as e:
             return ExportResult(file_path=file_path, format=ExportFormat.XLSX, success=False, error=str(e))
 
+    def export_to_excel(self, file_path: str, export_filter=None, columns=None) -> ExportResult:
+        """Alias for export_to_xlsx for API compatibility."""
+        return self.export_to_xlsx(file_path, export_filter=export_filter, columns=columns)
+
     def export_to_xml(self, file_path: str, export_filter: Optional[ExportFilter] = None, columns: Optional[Iterable[str]] = None) -> ExportResult:
         try:
             contacts = self._get_contacts()
@@ -189,6 +194,59 @@ class DataExporter:
         except Exception as e:
             return ExportResult(file_path=file_path, format=ExportFormat.XML, success=False, error=str(e))
 
+    def export_to_maltego(self, file_path: str, export_filter: Optional[ExportFilter] = None) -> ExportResult:
+        """Export contacts as a Maltego graph (.mtgl) XML file."""
+        try:
+            contacts = self._get_contacts()
+            filtered = self._apply_filters(contacts, export_filter)
+            data_rows = self._prepare_export_data(filtered)
+
+            if not self._validate_output_path(file_path):
+                return ExportResult(file_path=file_path, format=ExportFormat.MALTEGO, success=False, error="Permission denied")
+
+            lines = [
+                '<?xml version="1.0" encoding="UTF-8"?>',
+                '<MaltegoMessage>',
+                '  <MaltegoTransformResponseMessage>',
+                '    <Entities>',
+            ]
+            for row in data_rows:
+                email = row.get('email', '')
+                name = row.get('name', '')
+                company = row.get('company', '')
+                score = row.get('confidence_score', row.get('overall_score', ''))
+                lines.append('      <Entity Type="maltego.EmailAddress">')
+                lines.append(f'        <Value>{email}</Value>')
+                lines.append('        <AdditionalFields>')
+                if name:
+                    lines.append(f'          <Field Name="person.name" DisplayName="Name">{name}</Field>')
+                if company:
+                    lines.append(f'          <Field Name="person.organization" DisplayName="Organization">{company}</Field>')
+                if score != '':
+                    lines.append(f'          <Field Name="confidence_score" DisplayName="Confidence Score">{score}</Field>')
+                lines.append('        </AdditionalFields>')
+                lines.append('      </Entity>')
+            lines += [
+                '    </Entities>',
+                '  </MaltegoTransformResponseMessage>',
+                '</MaltegoMessage>',
+            ]
+
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(lines) + '\n')
+
+            file_size = self._get_file_size(file_path)
+            return ExportResult(
+                file_path=file_path,
+                format=ExportFormat.MALTEGO,
+                total_records=len(contacts),
+                filtered_records=len(filtered),
+                file_size=file_size,
+                success=True,
+            )
+        except Exception as e:
+            return ExportResult(file_path=file_path, format=ExportFormat.MALTEGO, success=False, error=str(e))
+
     def export_batch(self, base_name: str, formats: Iterable[ExportFormat]) -> list[ExportResult]:
         results: list[ExportResult] = []
         for fmt in formats:
@@ -202,6 +260,8 @@ class DataExporter:
                 res = self.export_to_xlsx(file_path)
             elif fmt == ExportFormat.XML:
                 res = self.export_to_xml(file_path)
+            elif fmt == ExportFormat.MALTEGO:
+                res = self.export_to_maltego(file_path)
             else:
                 res = ExportResult(file_path=file_path, format=fmt, success=False, error="Unsupported format")
             results.append(res)
@@ -267,17 +327,15 @@ class DataExporter:
                     s = self.scorer.score_contact(c)
                     row['overall_score'] = getattr(s, 'overall_score', None)
                     row['confidence'] = getattr(s, 'confidence', None)
-                    row['best_persona'] = getattr(s, 'best_persona', None)
+                    row['persona_match'] = getattr(s, 'best_persona', None)
                 except Exception:
-                    # Keep keys present even if scoring fails
                     row.setdefault('overall_score', None)
                     row.setdefault('confidence', None)
-                    row.setdefault('best_persona', None)
+                    row.setdefault('persona_match', None)
             else:
-                # Ensure keys exist for tests
-                row.setdefault('overall_score', None)
-                row.setdefault('confidence', None)
-                row.setdefault('best_persona', None)
+                row.setdefault('overall_score', getattr(c, 'overall_score', None))
+                row.setdefault('confidence', getattr(c, 'confidence_score', None))
+                row.setdefault('persona_match', getattr(c, 'persona_match', None))
 
             rows.append(row if not columns else self._select_columns(row, list(columns)))
         return rows
