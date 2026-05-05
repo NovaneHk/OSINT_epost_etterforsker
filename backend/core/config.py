@@ -9,6 +9,14 @@ from typing import List, Optional
 from functools import lru_cache
 
 
+PLACEHOLDER_SECRET_VALUES = {
+    "",
+    "your-secret-key-change-in-production",
+    "change-this-in-production",
+    "CHANGE_THIS",
+}
+
+
 class Settings:
     """Application settings with environment variable support"""
 
@@ -136,6 +144,11 @@ class Settings:
         self.SECRET_KEY = os.getenv("SECRET_KEY", self.SECRET_KEY)
         self.DATABASE_URL = os.getenv("DATABASE_URL", self.DATABASE_URL)
         self.ALLOWED_HOSTS = self._parse_csv_env("ALLOWED_HOSTS", self.ALLOWED_HOSTS)
+        if self.ENVIRONMENT != "production":
+            # Starlette/FastAPI TestClient sends requests with Host: testserver.
+            dev_hosts = {"localhost", "127.0.0.1", "testserver"}
+            merged_hosts = set(self.ALLOWED_HOSTS) | dev_hosts
+            self.ALLOWED_HOSTS = sorted(merged_hosts)
         self.SEED_DEFAULT_ADMIN = os.getenv(
             "SEED_DEFAULT_ADMIN",
             "true" if self.ENVIRONMENT != "production" else "false"
@@ -168,9 +181,9 @@ class Settings:
         self.ENABLE_ADMIN_DOCS = os.getenv("ENABLE_ADMIN_DOCS", "false").lower() == "true"
         self.ADMIN_DOCS_TOKEN = os.getenv("ADMIN_DOCS_TOKEN", self.ADMIN_DOCS_TOKEN)
 
-        if self.SECRET_KEY == "your-secret-key-change-in-production":
+        if self.SECRET_KEY in PLACEHOLDER_SECRET_VALUES:
             self.SECRET_KEY = self._build_secret("SECRET_KEY")
-        if self.JWT_SECRET_KEY == "your-secret-key-change-in-production":
+        if self.JWT_SECRET_KEY in PLACEHOLDER_SECRET_VALUES:
             self.JWT_SECRET_KEY = self._build_secret("JWT_SECRET_KEY")
 
         # Parse CORS origins
@@ -181,7 +194,7 @@ class Settings:
 
     def _build_secret(self, env_name: str) -> str:
         env_value = os.getenv(env_name)
-        if env_value:
+        if env_value and env_value not in PLACEHOLDER_SECRET_VALUES:
             return env_value
 
         if self.ENVIRONMENT == "production":
@@ -219,6 +232,10 @@ class Settings:
                 raise ValueError("SECRET_KEY must be set in production")
             if not self.JWT_SECRET_KEY:
                 raise ValueError("JWT_SECRET_KEY must be set in production")
+            if self.SECRET_KEY in PLACEHOLDER_SECRET_VALUES:
+                raise ValueError("SECRET_KEY cannot use placeholder value in production")
+            if self.JWT_SECRET_KEY in PLACEHOLDER_SECRET_VALUES:
+                raise ValueError("JWT_SECRET_KEY cannot use placeholder value in production")
             if self.ALLOWED_HOSTS == ["*"]:
                 raise ValueError("ALLOWED_HOSTS cannot be wildcard in production")
             if self.SEED_DEFAULT_ADMIN and not self.DEFAULT_ADMIN_PASSWORD:

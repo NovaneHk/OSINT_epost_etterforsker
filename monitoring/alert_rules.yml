@@ -179,3 +179,50 @@ groups:
         annotations:
           summary: "Container restart loop"
           description: "Container {{ $labels.name }} has restarted {{ $value }} times in the last 15 minutes."
+
+      # Security Alerts
+      - alert: HighAuthFailureRate
+        expr: rate(http_requests_total{status="401"}[5m]) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High authentication failure rate"
+          description: "Authentication failures are {{ $value }} per second — possible brute-force attack."
+
+      - alert: HighForbiddenRate
+        expr: rate(http_requests_total{status="403"}[5m]) > 0.3
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High forbidden request rate"
+          description: "Forbidden requests are {{ $value }} per second — possible unauthorized access attempt."
+
+      - alert: RateLimitTriggered
+        expr: rate(http_requests_total{status="429"}[5m]) > 1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rate limiting triggered"
+          description: "Rate limit responses: {{ $value }} per second — client may be abusing API."
+
+      # Data Pipeline Alerts
+      - alert: InvestigationQueueBacklog
+        expr: osint_investigation_queue_size > 500
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Investigation queue backlog"
+          description: "Investigation queue has {{ $value }} items pending."
+
+      - alert: WebSocketConnectionDrop
+        expr: osint_websocket_connections < 1
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: "No active WebSocket connections"
+          description: "No clients connected via WebSocket for 5 minutes."

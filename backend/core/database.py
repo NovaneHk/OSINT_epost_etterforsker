@@ -352,6 +352,7 @@ async def create_tables():
         with db_manager.get_connection() as conn:
             conn.executescript(comprehensive_schema)
             _ensure_settings_schema_compatibility(conn)
+            _ensure_leads_schema_compatibility(conn)
             _ensure_mfa_columns(conn)
             _ensure_gdpr_columns(conn)
             _ensure_indexes(conn)
@@ -400,6 +401,24 @@ def _ensure_settings_schema_compatibility(conn):
         conn.execute("ALTER TABLE lead_saved_views ADD COLUMN owner_role TEXT")
 
 
+def _ensure_leads_schema_compatibility(conn):
+    """Add columns expected by current API/indexes for legacy leads tables."""
+    cursor = conn.execute("PRAGMA table_info(leads)")
+    existing = {row[1] for row in cursor.fetchall()}
+
+    required_columns = [
+        ("domain", "TEXT"),
+        ("location", "TEXT"),
+        ("industry", "TEXT"),
+        ("verification_status", "TEXT DEFAULT 'unverified'"),
+        ("confidence_score", "REAL DEFAULT 0.0"),
+    ]
+
+    for column_name, column_definition in required_columns:
+        if column_name not in existing:
+            conn.execute(f"ALTER TABLE leads ADD COLUMN {column_name} {column_definition}")
+
+
 def _ensure_mfa_columns(conn):
     """Add MFA columns to users table if missing (idempotent for existing DBs)."""
     cursor = conn.execute("PRAGMA table_info(users)")
@@ -429,23 +448,32 @@ def _ensure_indexes(conn):
     conn.commit()
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
-    index_statements = [
-        "CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email)" if _table_exists(conn, "contacts") else None,
-        "CREATE INDEX IF NOT EXISTS idx_contacts_domain ON contacts(domain)" if _table_exists(conn, "contacts") else None,
-        "CREATE INDEX IF NOT EXISTS idx_contacts_company ON contacts(company)" if _table_exists(conn, "contacts") else None,
-        "CREATE INDEX IF NOT EXISTS idx_leads_email ON leads(email)",
-        "CREATE INDEX IF NOT EXISTS idx_leads_domain ON leads(domain)",
-        "CREATE INDEX IF NOT EXISTS idx_leads_industry ON leads(industry)",
-        "CREATE INDEX IF NOT EXISTS idx_leads_location ON leads(location)",
-        "CREATE INDEX IF NOT EXISTS idx_leads_score ON leads(verification_status, confidence_score DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status, created_at DESC)",
-        "CREATE INDEX IF NOT EXISTS idx_investigations_email ON investigations(email)",
-        "CREATE INDEX IF NOT EXISTS idx_investigations_status ON investigations(status)",
-        "CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id, created_at DESC)",
+    index_specs = [
+        ("contacts", ["email"], "CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email)"),
+        ("contacts", ["domain"], "CREATE INDEX IF NOT EXISTS idx_contacts_domain ON contacts(domain)"),
+        ("contacts", ["company"], "CREATE INDEX IF NOT EXISTS idx_contacts_company ON contacts(company)"),
+        ("leads", ["email"], "CREATE INDEX IF NOT EXISTS idx_leads_email ON leads(email)"),
+        ("leads", ["domain"], "CREATE INDEX IF NOT EXISTS idx_leads_domain ON leads(domain)"),
+        ("leads", ["industry"], "CREATE INDEX IF NOT EXISTS idx_leads_industry ON leads(industry)"),
+        ("leads", ["location"], "CREATE INDEX IF NOT EXISTS idx_leads_location ON leads(location)"),
+        ("leads", ["verification_status", "confidence_score"], "CREATE INDEX IF NOT EXISTS idx_leads_score ON leads(verification_status, confidence_score DESC)"),
+        ("runs", ["status", "created_at"], "CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status, created_at DESC)"),
+        ("investigations", ["email"], "CREATE INDEX IF NOT EXISTS idx_investigations_email ON investigations(email)"),
+        ("investigations", ["status"], "CREATE INDEX IF NOT EXISTS idx_investigations_status ON investigations(status)"),
+        ("audit_log", ["user_id", "created_at"], "CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id, created_at DESC)"),
+        ("campaigns", ["status", "created_at"], "CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status, created_at DESC)"),
+        ("campaigns", ["owner_id"], "CREATE INDEX IF NOT EXISTS idx_campaigns_owner ON campaigns(owner_id)"),
+        ("exports", ["status", "created_at"], "CREATE INDEX IF NOT EXISTS idx_exports_status ON exports(status, created_at DESC)"),
+        ("exports", ["created_by"], "CREATE INDEX IF NOT EXISTS idx_exports_creator ON exports(created_by)"),
+        ("sources", ["status", "created_at"], "CREATE INDEX IF NOT EXISTS idx_sources_status ON sources(status, created_at DESC)"),
+        ("playbooks", ["status"], "CREATE INDEX IF NOT EXISTS idx_playbooks_status ON playbooks(status)"),
+        ("leads", ["created_at"], "CREATE INDEX IF NOT EXISTS idx_leads_created ON leads(created_at DESC)"),
+        ("leads", ["company"], "CREATE INDEX IF NOT EXISTS idx_leads_company ON leads(company)"),
     ]
-    for stmt in index_statements:
-        if stmt:
-            conn.execute(stmt)
+
+    for table_name, columns, statement in index_specs:
+        if _columns_exist(conn, table_name, columns):
+            conn.execute(statement)
 
 
 def _table_exists(conn, table_name: str) -> bool:
@@ -453,6 +481,15 @@ def _table_exists(conn, table_name: str) -> bool:
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,)
     )
     return cursor.fetchone() is not None
+
+
+def _columns_exist(conn, table_name: str, columns: List[str]) -> bool:
+    """Return True only if table and all referenced columns exist."""
+    if not _table_exists(conn, table_name):
+        return False
+    cursor = conn.execute(f"PRAGMA table_info({table_name})")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+    return all(column in existing_columns for column in columns)
 
 
 def _ensure_users_seeded(conn):

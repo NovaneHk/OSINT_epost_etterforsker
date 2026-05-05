@@ -62,7 +62,7 @@ class TheHarvesterConnector(CLIConnector):
                 [self.tool_path, '-h'],
                 capture_output=True,
                 timeout=10,
-                shell=True if 'python' in self.tool_path else False
+                shell=False
             )
             return 'theHarvester' in result.stdout.decode().lower()
         except Exception as e:

@@ -75,7 +75,7 @@ class SalesforceConnector:
     def search_contact(self, email: str) -> Optional[Dict[str, Any]]:
         """Find an existing Lead/Contact by email via SOQL."""
         safe_email = re.sub(r"[^a-zA-Z0-9.@_\-]", "", email)
-        query = f"SELECT Id, Name, Email, Company FROM Lead WHERE Email = '{safe_email}' LIMIT 1"
+        query = "SELECT Id, Name, Email, Company FROM Lead WHERE Email = '{}' LIMIT 1".format(safe_email)
         resp = requests.get(
             f"{self.instance_url}/services/data/v57.0/query",
             params={"q": query},

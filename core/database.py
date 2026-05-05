@@ -882,7 +882,7 @@ class DatabaseManager:
     def cache_set(self, key: str, value: Any, ttl_seconds: int = 3600):
         """Store value in cache with TTL."""
 
-        cache_key = hashlib.md5(key.encode()).hexdigest()
+        cache_key = hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()  # nosec B324
         cache_value = json.dumps(value) if not isinstance(value, str) else value
         expires_at = datetime.now() + timedelta(seconds=ttl_seconds)
 
@@ -899,7 +899,7 @@ class DatabaseManager:
     def cache_get(self, key: str) -> Optional[Any]:
         """Retrieve value from cache if not expired."""
 
-        cache_key = hashlib.md5(key.encode()).hexdigest()
+        cache_key = hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()  # nosec B324
 
         with self._connect() as conn:
             cursor = conn.cursor()
