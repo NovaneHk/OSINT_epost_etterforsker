@@ -18,6 +18,9 @@ except ImportError:
     class PerformanceMonitor:
         def start_timer(self, name): return None
         def end_timer(self, timer_id): pass
+        def stop_timer(self, timer_id, category='operation'): return 0.0
+        def record_metric(self, name, value, unit, category, metadata=None): pass
+        def get_metrics(self): return {}
 
 # Initialize performance monitor
 performance_monitor = PerformanceMonitor()

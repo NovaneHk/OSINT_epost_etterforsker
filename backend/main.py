@@ -39,7 +39,12 @@ def validate_runtime_configuration() -> None:
     if missing:
         raise RuntimeError(f"Missing required runtime settings: {', '.join(missing)}")
 
-    placeholder_values = {"your-secret-key-change-in-production", "CHANGE_THIS"}
+    placeholder_values = {
+        "",
+        "your-secret-key-change-in-production",
+        "change-this-in-production",
+        "CHANGE_THIS",
+    }
     if settings.ENVIRONMENT == "production":
         invalid = [
             name for name in ["SECRET_KEY", "JWT_SECRET_KEY"]
