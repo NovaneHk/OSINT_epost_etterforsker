@@ -160,16 +160,29 @@ def _create_mfa_pending_token(user_id: str) -> str:
 
 
 def _touch_last_login(db: DatabaseManager, user_id: str) -> None:
-    db.execute_write(
-        """
-        UPDATE users
-        SET last_login = CURRENT_TIMESTAMP,
-            login_count = COALESCE(login_count, 0) + 1,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-        """,
-        (user_id,),
-    )
+    try:
+        db.execute_write(
+            """
+            UPDATE users
+            SET last_login = CURRENT_TIMESTAMP,
+                login_count = COALESCE(login_count, 0) + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (user_id,),
+        )
+    except Exception:
+        # Backward-compatible fallback for legacy schema using last_login_at.
+        db.execute_write(
+            """
+            UPDATE users
+            SET last_login_at = CURRENT_TIMESTAMP,
+                login_count = COALESCE(login_count, 0) + 1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (user_id,),
+        )
 
 
 @router.post(

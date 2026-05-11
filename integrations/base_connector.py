@@ -71,6 +71,10 @@ class BaseConnector(ABC):
         """Gather intelligence for the specified target"""
         pass
 
+    def validate_config(self) -> bool:
+        """Default config validator used by connector manager."""
+        return True
+
     def validate_target(self, target: str) -> bool:
         """Validate target format (domain, email, etc.)"""
         if not target or not isinstance(target, str):

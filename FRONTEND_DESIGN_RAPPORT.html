@@ -1,0 +1,1380 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nova Trace — Frontend Designrapport</title>
+<style>
+  :root {
+    --bg: #0F1117;
+    --bg2: #161B22;
+    --bg3: #21262D;
+    --border: #30363D;
+    --text: #E6EDF3;
+    --text2: #8B949E;
+    --accent: #0A84FF;
+    --accent2: #1F6FEB;
+    --green: #3FB950;
+    --yellow: #D29922;
+    --red: #F85149;
+    --purple: #BC8CFF;
+    --radius: 8px;
+    --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    line-height: 1.7;
+    font-size: 15px;
+    padding: 0;
+  }
+
+  /* ─── Top Bar ─── */
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(15,17,23,0.85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .topbar-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .topbar-title .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+  }
+  .copy-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 18px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.18s ease;
+  }
+  .copy-btn:hover { background: var(--bg2); border-color: var(--accent); color: var(--accent); }
+  .copy-btn.copied { background: rgba(63,185,80,0.15); border-color: var(--green); color: var(--green); }
+  .copy-btn svg { flex-shrink: 0; }
+
+  /* ─── Layout ─── */
+  .wrapper {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 52px 48px 96px;
+  }
+
+  /* ─── Report header ─── */
+  .report-header {
+    margin-bottom: 64px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 40px;
+  }
+  .report-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 16px;
+  }
+  .report-title {
+    font-size: 42px;
+    font-weight: 800;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    margin-bottom: 16px;
+  }
+  .report-subtitle {
+    font-size: 18px;
+    color: var(--text2);
+    max-width: 600px;
+    line-height: 1.6;
+  }
+  .meta-row {
+    display: flex;
+    gap: 24px;
+    margin-top: 24px;
+    flex-wrap: wrap;
+  }
+  .meta-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text2);
+  }
+  .meta-item strong { color: var(--text); }
+
+  /* ─── Table of Contents ─── */
+  .toc {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px 28px;
+    margin-bottom: 52px;
+  }
+  .toc-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text2);
+    margin-bottom: 16px;
+  }
+  .toc-list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 24px;
+    list-style: none;
+  }
+  .toc-list li a {
+    color: var(--text2);
+    text-decoration: none;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: color 0.15s;
+  }
+  .toc-list li a:hover { color: var(--accent); }
+  .toc-num {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    min-width: 22px;
+  }
+
+  /* ─── Sections ─── */
+  .section {
+    margin-bottom: 64px;
+    scroll-margin-top: 80px;
+  }
+  .section-num {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  h2 {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    color: var(--text);
+    margin-bottom: 20px;
+    line-height: 1.25;
+  }
+  h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 12px;
+    margin-top: 32px;
+  }
+  h3:first-child { margin-top: 0; }
+  p {
+    color: var(--text2);
+    margin-bottom: 16px;
+    font-size: 14.5px;
+  }
+  p strong { color: var(--text); }
+  ul, ol { padding-left: 20px; margin-bottom: 16px; }
+  li {
+    color: var(--text2);
+    margin-bottom: 6px;
+    font-size: 14.5px;
+  }
+  li strong { color: var(--text); }
+
+  /* ─── Cards & callouts ─── */
+  .card-grid {
+    display: grid;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .card-grid-2 { grid-template-columns: 1fr 1fr; }
+  .card-grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+  }
+  .card-icon {
+    font-size: 20px;
+    margin-bottom: 10px;
+  }
+  .card h4 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .card p {
+    font-size: 13px;
+    color: var(--text2);
+    margin: 0;
+  }
+
+  .callout {
+    background: rgba(10,132,255,0.08);
+    border: 1px solid rgba(10,132,255,0.3);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    color: var(--text2);
+  }
+  .callout strong { color: var(--accent); }
+  .callout-warn {
+    background: rgba(210,153,34,0.08);
+    border-color: rgba(210,153,34,0.3);
+    border-left-color: var(--yellow);
+  }
+  .callout-warn strong { color: var(--yellow); }
+  .callout-success {
+    background: rgba(63,185,80,0.08);
+    border-color: rgba(63,185,80,0.3);
+    border-left-color: var(--green);
+  }
+  .callout-success strong { color: var(--green); }
+
+  /* ─── Color swatches ─── */
+  .swatch-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .swatch {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  .swatch-box {
+    width: 52px;
+    height: 52px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .swatch span {
+    font-size: 10px;
+    color: var(--text2);
+    font-family: var(--font-mono);
+    text-align: center;
+  }
+
+  /* ─── Layout diagram ─── */
+  .layout-diagram {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text2);
+    line-height: 1.8;
+    margin-bottom: 20px;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  /* ─── Spec table ─── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+    font-size: 13.5px;
+  }
+  thead tr { border-bottom: 1px solid var(--border); }
+  th {
+    text-align: left;
+    padding: 10px 14px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text2);
+  }
+  td {
+    padding: 10px 14px;
+    color: var(--text2);
+    border-bottom: 1px solid rgba(48,54,61,0.5);
+    vertical-align: top;
+  }
+  td:first-child { color: var(--text); font-weight: 500; }
+  tr:last-child td { border-bottom: none; }
+
+  /* ─── Tag / badge ─── */
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-right: 4px;
+    margin-bottom: 4px;
+  }
+  .tag-blue { background: rgba(10,132,255,0.15); color: var(--accent); }
+  .tag-green { background: rgba(63,185,80,0.15); color: var(--green); }
+  .tag-yellow { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  .tag-purple { background: rgba(188,140,255,0.15); color: var(--purple); }
+  .tag-red { background: rgba(248,81,73,0.15); color: var(--red); }
+
+  /* ─── Priority list ─── */
+  .priority-list { list-style: none; padding: 0; }
+  .priority-item {
+    display: flex;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: var(--radius);
+    margin-bottom: 8px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    align-items: flex-start;
+  }
+  .priority-badge {
+    font-size: 10px;
+    font-weight: 800;
+    padding: 2px 7px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    margin-top: 2px;
+    letter-spacing: 0.05em;
+  }
+  .p1 { background: rgba(248,81,73,0.2); color: var(--red); }
+  .p2 { background: rgba(210,153,34,0.2); color: var(--yellow); }
+  .p3 { background: rgba(63,185,80,0.2); color: var(--green); }
+  .priority-item-text { font-size: 13.5px; color: var(--text2); }
+  .priority-item-text strong { color: var(--text); }
+
+  /* ─── Wireframe ─── */
+  .wireframe {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+  .wf-topbar {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    height: 44px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    gap: 10px;
+  }
+  .wf-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .wf-body { display: flex; gap: 12px; height: 280px; }
+  .wf-sidebar {
+    width: 200px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .wf-nav-item {
+    height: 32px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    gap: 8px;
+  }
+  .wf-nav-item.active {
+    background: rgba(10,132,255,0.12);
+    border-color: rgba(10,132,255,0.3);
+  }
+  .wf-icon { width: 12px; height: 12px; background: var(--text2); border-radius: 2px; flex-shrink: 0; }
+  .wf-icon.active { background: var(--accent); }
+  .wf-label { height: 8px; background: var(--text2); border-radius: 2px; width: 60%; opacity: 0.4; }
+  .wf-label.active { background: var(--accent); opacity: 0.7; }
+  .wf-content { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+  .wf-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .wf-kpi {
+    height: 70px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .wf-chart {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 10px;
+  }
+  .wf-chart-big, .wf-chart-small {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+
+  /* ─── Page nav hints ─── */
+  .page-nav-strip {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+  .page-nav-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--text2);
+  }
+  .page-nav-chip .chip-key {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--accent);
+  }
+
+  /* ─── Divider ─── */
+  hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+
+  /* ─── Code ─── */
+  code {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    color: var(--purple);
+  }
+
+  /* ─── Scroll top ─── */
+  #back-top {
+    position: fixed;
+    bottom: 32px;
+    right: 32px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: var(--text2);
+    cursor: pointer;
+    transition: all 0.15s;
+    display: none;
+    z-index: 99;
+  }
+  #back-top:hover { color: var(--accent); border-color: var(--accent); }
+
+  @media (max-width: 700px) {
+    .wrapper { padding: 24px 20px 64px; }
+    .topbar { padding: 12px 20px; }
+    .card-grid-2, .card-grid-3 { grid-template-columns: 1fr; }
+    .toc-list { grid-template-columns: 1fr; }
+    .wf-body { height: auto; flex-direction: column; }
+    .wf-sidebar { width: 100%; height: 80px; flex-direction: row; flex-wrap: wrap; }
+    .report-title { font-size: 28px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ─── Top Bar ─── -->
+<div class="topbar">
+  <div class="topbar-title">
+    <span class="dot"></span>
+    Nova Trace — Frontend Designrapport
+  </div>
+  <button class="copy-btn" id="copyBtn" onclick="copyReport()">
+    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+    </svg>
+    Kopier rapport
+  </button>
+</div>
+
+<!-- ─── Scroll to top ─── -->
+<button id="back-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑ Topp</button>
+
+<div class="wrapper" id="report-content">
+
+  <!-- ─── Header ─── -->
+  <div class="report-header">
+    <div class="report-label">Konfidensielt designdokument</div>
+    <h1 class="report-title">Det perfekte frontend<br>for Nova Trace</h1>
+    <p class="report-subtitle">En helhetlig analyse av hvordan grensesnittet bør se ut, oppføre seg og føles — bygget for å maksimere produktivitet, eksklusivitet og datakvalitet i OSINT e-post-etterforskning.</p>
+    <div class="meta-row">
+      <div class="meta-item"><strong>Versjon:</strong> 1.0</div>
+      <div class="meta-item"><strong>Dato:</strong> Mai 2026</div>
+      <div class="meta-item"><strong>Stack:</strong> Next.js 14 · Tailwind · shadcn/ui · Framer Motion</div>
+      <div class="meta-item"><strong>Mål:</strong> Pro B2B OSINT dashboard</div>
+    </div>
+  </div>
+
+  <!-- ─── TOC ─── -->
+  <div class="toc">
+    <div class="toc-title">Innholdsfortegnelse</div>
+    <ol class="toc-list">
+      <li><a href="#s1"><span class="toc-num">01</span> Designfilosofi og identitet</a></li>
+      <li><a href="#s2"><span class="toc-num">02</span> Fargesystem og visuelt hierarki</a></li>
+      <li><a href="#s3"><span class="toc-num">03</span> Typografi og spacing</a></li>
+      <li><a href="#s4"><span class="toc-num">04</span> Layoutarkitektur</a></li>
+      <li><a href="#s5"><span class="toc-num">05</span> Navigasjonsdesign</a></li>
+      <li><a href="#s6"><span class="toc-num">06</span> Dashboard-side</a></li>
+      <li><a href="#s7"><span class="toc-num">07</span> Nøkkelsider</a></li>
+      <li><a href="#s8"><span class="toc-num">08</span> Søk og kommandosentral</a></li>
+      <li><a href="#s9"><span class="toc-num">09</span> Datavisualisering</a></li>
+      <li><a href="#s10"><span class="toc-num">10</span> Mikrointeraksjoner og animasjon</a></li>
+      <li><a href="#s11"><span class="toc-num">11</span> Tilgjengelighet og ytelse</a></li>
+      <li><a href="#s12"><span class="toc-num">12</span> Implementeringsprioriteringer</a></li>
+    </ol>
+  </div>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- 01 — Designfilosofi -->
+  <!-- ══════════════════════════════════════════ -->
+  <div class="section" id="s1">
+    <div class="section-num">01 / 12</div>
+    <h2>Designfilosofi og identitet</h2>
+
+    <p>Nova Trace er ikke et generisk SaaS-verktøy. Det er <strong>profesjonell etterretningsprogramvare</strong> — et instrument for beslutningstakere som trenger nøyaktige data raskt. Grensesnittet må reflektere dette: presisjon over pynt, informasjon over dekorasjon, men aldri på bekostning av eksklusivitet.</p>
+
+    <div class="callout">
+      <strong>Kjerneprisippet:</strong> Bruker skal aldri lure på hva de skal gjøre videre. Verktøyet leder dem — stille, effektivt og alltid et skritt foran.
+    </div>
+
+    <div class="card-grid card-grid-3">
+      <div class="card">
+        <div class="card-icon">🎯</div>
+        <h4>Presisjon</h4>
+        <p>Hvert element har en klar funksjon. Ingen fyll, ingen distraksjoner. Data presenteres med kirurgisk tydelighet.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">💎</div>
+        <h4>Eksklusivitet</h4>
+        <p>Mørk overflate, høy kontrast, tydelig typografi. Produktet skal se dyrt ut — fordi det er det.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">⚡</div>
+        <h4>Hastighet</h4>
+        <p>Optimistisk UI, inline redigering, hurtigtaster overalt. Kravet er null klikk til neste arbeidsoppgave.</p>
+      </div>
+    </div>
+
+    <h3>Posisjonering blant referanseprodukter</h3>
+    <table>
+      <thead><tr><th>Produkt</th><th>Hva vi tar</th><th>Hva vi gjør bedre</th></tr></thead>
+      <tbody>
+        <tr><td>Linear</td><td>Keyboard-first, rene lister, presise animasjoner</td><td>Datavisualisering, real-time OSINT feeds</td></tr>
+        <tr><td>Vercel Dashboard</td><td>Mørkt tema, statusikoner, typografi-hierarki</td><td>Domene-spesifikk logikk, norsk språk</td></tr>
+        <tr><td>Retool</td><td>Datadrevet layout, fleksible tabeller</td><td>Mye renere og mer fokusert UX</td></tr>
+        <tr><td>Grafana</td><td>Tett dashboardpacking, live data</td><td>Lettere, mer B2B-vennlig navigasjon</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Merkepersonlighet</h3>
+    <div class="page-nav-strip">
+      <div class="page-nav-chip">Analytisk</div>
+      <div class="page-nav-chip">Presist</div>
+      <div class="page-nav-chip">Eksklusivt</div>
+      <div class="page-nav-chip">Effektivt</div>
+      <div class="page-nav-chip">Pålitelig</div>
+      <div class="page-nav-chip">Diskret</div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- 02 — Fargesystem -->
+  <!-- ══════════════════════════════════════════ -->
+  <div class="section" id="s2">
+    <div class="section-num">02 / 12</div>
+    <h2>Fargesystem og visuelt hierarki</h2>
+
+    <p>Fargesystemet er bygget for et <strong>dark-first</strong> produkt. Mørk bakgrunn reduserer øyeutmattelse under lange arbeidsøkter og gir data rom til å lyse opp. Lys modus eksisterer som et valg, men mørk er identiteten.</p>
+
+    <h3>Primærpalett — Dark mode</h3>
+    <div class="swatch-row">
+      <div class="swatch"><div class="swatch-box" style="background:#0F1117"></div><span>#0F1117<br>BG</span></div>
+      <div class="swatch"><div class="swatch-box" style="background:#161B22"></div><span>#161B22<br>Surface</span></div>
+      <div class="swatch"><div class="swatch-box" style="background:#21262D"></div><span>#21262D<br>Elevated</span></div>
+      <div class="swatch"><div class="swatch-box" style="background:#30363D"></div><span>#30363D<br>Border</span></div>
+      <div class="swatch"><div class="swatch-box" style="background:#8B949E"></div><span>#8B949E<br>Muted</span></div>
+      <div class="swatch"><div class="swatch-box" style="background:#E6EDF3"></div><span>#E6EDF3<br>Text</span></div>
+    </div>
+
+    <h3>Aksentfarger</h3>
+    <div class="swatch-row">
+      <div class="swatch"><div class="swatch-box" style="background:#0A84FF"></div><span>#0A84FF<br>Primary</span></div>
+      <div class="swatch"><div class="swatch-box" style="background:#1F6FEB"></div><span>#1F6FEB<br>Pri.Dark</span></div>
+      <div class="swatch"><div class="swatch-box" style="background:#3FB950"></div><span>#3FB950<br>Success</span></div>
+      <div class="swatch"><div class="swatch-box" style="background:#D29922"></div><span>#D29922<br>Warning</span></div>
+      <div class="swatch"><div class="swatch-box" style="background:#F85149"></div><span>#F85149<br>Error</span></div>
+      <div class="swatch"><div class="swatch-box" style="background:#BC8CFF"></div><span>#BC8CFF<br>Purple</span></div>
+      <div class="swatch"><div class="swatch-box" style="background:#79C0FF"></div><span>#79C0FF<br>Info</span></div>
+    </div>
+
+    <h3>Bruksregler for farge</h3>
+    <table>
+      <thead><tr><th>Element</th><th>Farge</th><th>Begrunnelse</th></tr></thead>
+      <tbody>
+        <tr><td>Primær CTA, aktive nav-elementer</td><td><code>#0A84FF</code></td><td>Høy synlighet, tydelig handlingsindikator</td></tr>
+        <tr><td>Suksessstatus (e-post validert, run OK)</td><td><code>#3FB950</code></td><td>Universell suksess-farge</td></tr>
+        <tr><td>Advarsel (lav confidence score)</td><td><code>#D29922</code></td><td>Gul varsler uten å skremme</td></tr>
+        <tr><td>Feil / blokkert kilde</td><td><code>#F85149</code></td><td>Tydelig feil uten å dominere hele siden</td></tr>
+        <tr><td>AI-analyse, ML-score</td><td><code>#BC8CFF</code></td><td>Lilla = maskin-innsikt, ikke menneskelig</td></tr>
+        <tr><td>Grafer linje 1 (leads over tid)</td><td><code>#0A84FF</code></td><td>Primær metric = primær farge</td></tr>
+        <tr><td>Grafer linje 2 (søk over tid)</td><td><code>#3FB950</code></td><td>Komplementær mot blå</td></tr>
+        <tr><td>Grafer linje 3 (eksporter)</td><td><code>#BC8CFF</code></td><td>Tredjekanalen er AI/output</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout callout-warn">
+      <strong>Viktig:</strong> Unngå å bruke farge alene for å formidle status. Kombiner alltid farge med ikon og/eller tekst for universell tilgjengelighet (WCAG AA).
+    </div>
+
+    <h3>Semantisk badge-system</h3>
+    <p>Badges skal kommunisere status umiddelbart — farger må være konsistente på tvers av alle sider:</p>
+    <div>
+      <span class="tag tag-green">● Aktiv</span>
+      <span class="tag tag-yellow">● Pågår</span>
+      <span class="tag tag-red">● Feil</span>
+      <span class="tag tag-blue">● Validert</span>
+      <span class="tag tag-purple">● AI-analysert</span>
+      <span class="tag tag-blue">● Høy score</span>
+      <span class="tag tag-yellow">● Medium score</span>
+      <span class="tag tag-red">● Lav score</span>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- 03 — Typografi -->
+  <!-- ══════════════════════════════════════════ -->
+  <div class="section" id="s3">
+    <div class="section-num">03 / 12</div>
+    <h2>Typografi og spacing</h2>
+
+    <p>Typografi er det mest undervurderte elementet i datadashboards. Riktig type-hierarki reduserer kognitiv last med opptil 40% — brukeren skanner siden og finner det de trenger uten å lese alt.</p>
+
+    <h3>Skriftsystem</h3>
+    <table>
+      <thead><tr><th>Rolle</th><th>Font</th><th>Fallback</th><th>Begrunnelse</th></tr></thead>
+      <tbody>
+        <tr><td>Brødtekst / UI</td><td>Inter</td><td>-apple-system, Segoe UI</td><td>Overlegen lesbarhet på skjerm, nøytral og profesjonell</td></tr>
+        <tr><td>Tall / kode / IDs</td><td>JetBrains Mono</td><td>Fira Code, Consolas</td><td>Tabulære tall, e-postadresser, API-nøkler alltid rettlest</td></tr>
+        <tr><td>Side-titler (valgfritt)</td><td>Inter Display</td><td>Inter</td><td>Stramere letter-spacing på store størrelser</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Typeskala</h3>
+    <table>
+      <thead><tr><th>Navn</th><th>Størrelse</th><th>Vekt</th><th>Bruk</th></tr></thead>
+      <tbody>
+        <tr><td>Display</td><td>36px / 2.25rem</td><td>800</td><td>Sidetitler på tomme states, onboarding</td></tr>
+        <tr><td>H1</td><td>28px / 1.75rem</td><td>700</td><td>Sidehode (f.eks. "Dashboard")</td></tr>
+        <tr><td>H2</td><td>20px / 1.25rem</td><td>600</td><td>Seksjonsoverskrifter, modal-titler</td></tr>
+        <tr><td>H3</td><td>15px / 0.9375rem</td><td>600</td><td>Kort-titler, tabell-headers</td></tr>
+        <tr><td>Body</td><td>14px / 0.875rem</td><td>400</td><td>All brødtekst, dropdown-valg</td></tr>
+        <tr><td>Small</td><td>12px / 0.75rem</td><td>400</td><td>Metadata, timestamps, hints</td></tr>
+        <tr><td>Micro</td><td>11px / 0.6875rem</td><td>600</td><td>UPPERCASE labels, etiketter</td></tr>
+        <tr><td>KPI-tall</td><td>32px / 2rem</td><td>700</td><td>Nøkkeltall i KPI-kort</td></tr>
+        <tr><td>Mono data</td><td>13px</td><td>500</td><td>E-postadresser, API-keys, IP-er, scorer</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Spacing-system (8px grid)</h3>
+    <p>Alt spacing er basert på <strong>8px-grid</strong>. Ingen halvpiksel-verdier, ingen odde tall. Dette sikrer visuell konsistens på tvers av alle komponenter.</p>
+    <table>
+      <thead><tr><th>Token</th><th>Verdi</th><th>Bruk</th></tr></thead>
+      <tbody>
+        <tr><td>space-1</td><td>4px</td><td>Inline gap mellom ikon og tekst</td></tr>
+        <tr><td>space-2</td><td>8px</td><td>Indre padding i chips/badges</td></tr>
+        <tr><td>space-3</td><td>12px</td><td>Liten card-padding, mellom nav-items</td></tr>
+        <tr><td>space-4</td><td>16px</td><td>Standard card-padding</td></tr>
+        <tr><td>space-5</td><td>20px</td><td>Seksjonsgap, form-felt gap</td></tr>
+        <tr><td>space-6</td><td>24px</td><td>Card-padding (large), modal padding</td></tr>
+        <tr><td>space-8</td><td>32px</td><td>Mellom seksjoner</td></tr>
+        <tr><td>space-12</td><td>48px</td><td>Page-padding top/bottom</td></tr>
+        <tr><td>space-16</td><td>64px</td><td>Mellom store seksjoner</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- 04 — Layout -->
+  <!-- ══════════════════════════════════════════ -->
+  <div class="section" id="s4">
+    <div class="section-num">04 / 12</div>
+    <h2>Layoutarkitektur</h2>
+
+    <p>Layouten er et <strong>3-sone-system</strong>: venstre navigasjon, øverst kontekstuell verktøylinje, og et adaptivt innholdsområde. Systemet skalerer fra 1280px til 4K uten layout-brudd.</p>
+
+    <div class="wireframe">
+      <div class="wf-topbar">
+        <div class="wf-dot" style="background:#0A84FF;width:20px;height:20px;border-radius:4px;"></div>
+        <div style="width:80px;height:8px;background:#E6EDF3;border-radius:2px;opacity:0.6;"></div>
+        <div style="flex:1"></div>
+        <div style="width:200px;height:26px;background:#21262D;border-radius:4px;border:1px solid #30363D;display:flex;align-items:center;padding:0 8px;gap:6px;">
+          <div style="width:10px;height:10px;background:#8B949E;border-radius:50%;"></div>
+          <div style="width:100px;height:7px;background:#30363D;border-radius:2px;"></div>
+          <div style="margin-left:auto;font-size:9px;color:#8B949E;font-family:monospace;">⌘K</div>
+        </div>
+        <div style="flex:1"></div>
+        <div class="wf-dot" style="background:#3FB950;width:8px;height:8px;"></div>
+        <div class="wf-dot" style="background:#D29922;width:8px;height:8px;"></div>
+        <div style="width:28px;height:28px;background:#21262D;border-radius:50%;border:1px solid #0A84FF;"></div>
+      </div>
+      <div class="wf-body">
+        <div class="wf-sidebar">
+          <div style="height:20px;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+            <div style="width:20px;height:20px;background:#0A84FF;border-radius:4px;"></div>
+            <div style="width:80px;height:8px;background:#E6EDF3;border-radius:2px;opacity:0.5;"></div>
+          </div>
+          <div class="wf-nav-item active"><div class="wf-icon active"></div><div class="wf-label active"></div></div>
+          <div class="wf-nav-item"><div class="wf-icon"></div><div class="wf-label"></div></div>
+          <div class="wf-nav-item"><div class="wf-icon"></div><div class="wf-label"></div></div>
+          <div class="wf-nav-item"><div class="wf-icon"></div><div class="wf-label"></div></div>
+          <div class="wf-nav-item"><div class="wf-icon"></div><div class="wf-label"></div></div>
+          <div class="wf-nav-item"><div class="wf-icon"></div><div class="wf-label"></div></div>
+          <div style="flex:1"></div>
+          <div class="wf-nav-item"><div class="wf-icon"></div><div class="wf-label"></div></div>
+        </div>
+        <div class="wf-content">
+          <div class="wf-grid">
+            <div class="wf-kpi"></div>
+            <div class="wf-kpi"></div>
+            <div class="wf-kpi"></div>
+            <div class="wf-kpi"></div>
+          </div>
+          <div class="wf-chart">
+            <div class="wf-chart-big" style="padding:12px;">
+              <div style="height:8px;width:120px;background:#30363D;border-radius:2px;margin-bottom:10px;"></div>
+              <div style="height:calc(100% - 30px);display:flex;align-items:flex-end;gap:4px;padding-top:8px;">
+                <div style="flex:1;height:40%;background:rgba(10,132,255,0.25);border-radius:2px 2px 0 0;border-top:2px solid #0A84FF;"></div>
+                <div style="flex:1;height:65%;background:rgba(10,132,255,0.25);border-radius:2px 2px 0 0;border-top:2px solid #0A84FF;"></div>
+                <div style="flex:1;height:55%;background:rgba(10,132,255,0.25);border-radius:2px 2px 0 0;border-top:2px solid #0A84FF;"></div>
+                <div style="flex:1;height:80%;background:rgba(10,132,255,0.25);border-radius:2px 2px 0 0;border-top:2px solid #0A84FF;"></div>
+                <div style="flex:1;height:70%;background:rgba(10,132,255,0.25);border-radius:2px 2px 0 0;border-top:2px solid #0A84FF;"></div>
+                <div style="flex:1;height:90%;background:rgba(10,132,255,0.25);border-radius:2px 2px 0 0;border-top:2px solid #0A84FF;"></div>
+                <div style="flex:1;height:100%;background:rgba(10,132,255,0.3);border-radius:2px 2px 0 0;border-top:2px solid #0A84FF;"></div>
+              </div>
+            </div>
+            <div class="wf-chart-small" style="padding:12px;display:flex;flex-direction:column;gap:8px;">
+              <div style="height:8px;width:80px;background:#30363D;border-radius:2px;"></div>
+              <div style="height:8px;width:100%;background:rgba(10,132,255,0.15);border-radius:2px;position:relative;"><div style="height:100%;width:72%;background:#0A84FF;border-radius:2px;"></div></div>
+              <div style="height:8px;width:100%;background:rgba(63,185,80,0.15);border-radius:2px;"><div style="height:100%;width:45%;background:#3FB950;border-radius:2px;"></div></div>
+              <div style="height:8px;width:100%;background:rgba(188,140,255,0.15);border-radius:2px;"><div style="height:100%;width:88%;background:#BC8CFF;border-radius:2px;"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3>Dimensjoner og bruddpunkter</h3>
+    <table>
+      <thead><tr><th>Sone</th><th>Bredde</th><th>Merknad</th></tr></thead>
+      <tbody>
+        <tr><td>Venstre sidebar (expanded)</td><td>240px</td><td>Viser ikon + navn + snarvei</td></tr>
+        <tr><td>Venstre sidebar (collapsed)</td><td>64px</td><td>Kun ikoner, tooltip ved hover</td></tr>
+        <tr><td>Topbar</td><td>100% - sidebar</td><td>44px høyde, sticky</td></tr>
+        <tr><td>Innholdsområde max-width</td><td>1400px</td><td>Sentrert på brede skjermer</td></tr>
+        <tr><td>Content padding</td><td>24px / 32px</td><td>24px mobil, 32px desktop</td></tr>
+        <tr><td>Breakpoint: collapse sidebar</td><td>&lt; 1024px</td><td>Sidebar skjules, hamburger vises</td></tr>
+        <tr><td>Breakpoint: bottom nav</td><td>&lt; 768px</td><td>Mobil-navigasjon i bunnen</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout callout-success">
+      <strong>Sidebar collapse:</strong> Sidebaren bør ha en fast collapse-toggle (<code>⌘ \</code> eller klikk på pilen). Brukerpreferansen lagres i <code>localStorage</code> og huskes på tvers av sider.
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- 05 — Navigasjon -->
+  <!-- ══════════════════════════════════════════ -->
+  <div class="section" id="s5">
+    <div class="section-num">05 / 12</div>
+    <h2>Navigasjonsdesign</h2>
+
+    <p>Navigasjonen er ryggraden i appen. Den må gi øyeblikkelig kontekst, støtte kraftbrukere med tastaturflyt, og aldri dominere over innholdet.</p>
+
+    <h3>Sidebar-anatomi</h3>
+    <table>
+      <thead><tr><th>Komponent</th><th>Detalj</th></tr></thead>
+      <tbody>
+        <tr><td>Logo-område</td><td>24px høyde, venstre-justert. Klikk → Dashboard. Ingen redirect til ekstern URL.</td></tr>
+        <tr><td>Workspace-switcher</td><td>Hvis multi-org: dropdown under logo med workspace-navn og avatar</td></tr>
+        <tr><td>Nav-gruppe "Hoved"</td><td>Dashboard, Leads, Kilder, Kjøringer, Segmenter</td></tr>
+        <tr><td>Nav-gruppe "Output"</td><td>Eksporter, Rapporter</td></tr>
+        <tr><td>Nav-gruppe "Avansert"</td><td>Playbooks, Automatisering, Monitoring</td></tr>
+        <tr><td>Bunn-sone</td><td>Innstillinger, Hjelp, Bruker-avatar + navn + logout</td></tr>
+        <tr><td>Aktiv indikator</td><td>2px blå left-border + blå bakgrunn (8% opacity)</td></tr>
+        <tr><td>Snarvei-chip</td><td>Vises til høyre på hover: <code>G D</code>, <code>G L</code> osv.</td></tr>
+        <tr><td>Badge/teller</td><td>Rød badge for uleste varsler, gul for pågående kjøringer</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Navigasjonssnarveier — tastaturflyt</h3>
+    <div class="page-nav-strip">
+      <div class="page-nav-chip">Dashboard <span class="chip-key">G D</span></div>
+      <div class="page-nav-chip">Leads <span class="chip-key">G L</span></div>
+      <div class="page-nav-chip">Kilder <span class="chip-key">G S</span></div>
+      <div class="page-nav-chip">Kjøringer <span class="chip-key">G R</span></div>
+      <div class="page-nav-chip">Segmenter <span class="chip-key">G C</span></div>
+      <div class="page-nav-chip">Eksporter <span class="chip-key">G E</span></div>
+      <div class="page-nav-chip">Playbooks <span class="chip-key">G P</span></div>
+      <div class="page-nav-chip">Innstillinger <span class="chip-key">G ,</span></div>
+      <div class="page-nav-chip">Kommandopal. <span class="chip-key">⌘K</span></div>
+      <div class="page-nav-chip">Ny kjøring <span class="chip-key">⌘↵</span></div>
+      <div class="page-nav-chip">Søk <span class="chip-key">/</span></div>
+      <div class="page-nav-chip">Sidebar toggle <span class="chip-key">⌘ \</span></div>
+    </div>
+
+    <h3>Topbar-komponenter</h3>
+    <table>
+      <thead><tr><th>Slot</th><th>Innhold</th><th>Interaksjon</th></tr></thead>
+      <tbody>
+        <tr><td>Venstre</td><td>Hamburger (mobil) / Brødsmule (desktop)</td><td>Viser nåværende sidelokasjon med path</td></tr>
+        <tr><td>Senter</td><td>Global søkeboks <code>⌘K</code></td><td>Åpner command palette ved fokus</td></tr>
+        <tr><td>Høyre</td><td>Run-status indikator · Varsel-bjelle · Tema-toggle · Avatar</td><td>Live badge på pågående kjøringer</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      <strong>Kritisk UX:</strong> Brødsmule i topbar skal alltid reflektere nåværende URL-hierarki. "Dashboard / Leads / #1234" gir brukere umiddelbar kontekstuell orientering uten å tenke.
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- 06 — Dashboard -->
+  <!-- ══════════════════════════════════════════ -->
+  <div class="section" id="s6">
+    <div class="section-num">06 / 12</div>
+    <h2>Dashboard-side</h2>
+
+    <p>Dashboardet er <strong>kontrollsenteret</strong>. Det svarer på ett spørsmål i løpet av 3 sekunder: <em>«Er systemet friskt og produserer det verdi?»</em></p>
+
+    <h3>Above the fold (første skjerm)</h3>
+    <p>Første skjerm uten scrolling skal alltid inneholde de 4–6 viktigste KPI-ene og en graf som viser retning over tid.</p>
+
+    <div class="card-grid card-grid-2">
+      <div class="card">
+        <h4>KPI-rad (4 kort)</h4>
+        <p>Leads 7d · Søk 7d · Konverteringsrate · Eksporter 7d. Hvert kort: stor tallfont (32px bold), prosentvis endring fra forrige periode (grønn/rød pil), sparkline som bakgrunns-thumbnails.</p>
+      </div>
+      <div class="card">
+        <h4>Trend-graf (area chart)</h4>
+        <p>Leads produsert over de siste 30 dagene. Interaktivt hover med tooltip. Zoome-kontroller (7d / 30d / 90d). Overlapper med søk-data som sekundær linje.</p>
+      </div>
+      <div class="card">
+        <h4>Aktive kjøringer</h4>
+        <p>Live-tabell over kjøringer som kjører nå. Fremdriftslinje, startede for X min siden, estimert ferdig. Klikk åpner kjøring-detaljside.</p>
+      </div>
+      <div class="card">
+        <h4>Kilde-helse</h4>
+        <p>Mini-grid med alle konfigurerte kilder. Grønn prikk = OK, gul = treg, rød = ned. Siste sjekk-timestamp. Klikk → Kilder-siden.</p>
+      </div>
+    </div>
+
+    <h3>Below the fold</h3>
+    <ul>
+      <li><strong>Siste leads (5 rader)</strong> — Kompakt tabell med e-post, domene, score-badge, og timestamp. "Se alle" link.</li>
+      <li><strong>Aktivitetsfeed</strong> — Kronologisk logg: "Kilde X returnerte 42 resultater", "Export #77 fullført", "Ny lead: contact@company.no". Max 20 items, paginert.</li>
+      <li><strong>Hurtighandlinger</strong> — 3 knapper: "Ny kjøring", "Importer leads", "Eksporter rapport". Alltid tilgjengelige i bunn-høyre som FAB (Floating Action Button).</li>
+    </ul>
+
+    <h3>Tomme states</h3>
+    <p>Ny bruker ser aldri en tom side med null-verdier. Vis onboarding-prompt: "Du har ingen kjøringer ennå — start din første her." Med illustrasjon (SVG, ikke stockfoto) og primær CTA-knapp.</p>
+  </div>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- 07 — Nøkkelsider -->
+  <!-- ══════════════════════════════════════════ -->
+  <div class="section" id="s7">
+    <div class="section-num">07 / 12</div>
+    <h2>Nøkkelsider — detaljert spec</h2>
+
+    <h3>Leads-siden <span class="tag tag-blue">Høy prioritet</span></h3>
+    <p>Den mest brukte siden. Brukere tilbringer mest tid her, sorterer, filtrerer og eksporterer leads.</p>
+    <ul>
+      <li><strong>Verktøylinje over tabellen:</strong> Søkefelt (inline, ikke i topbar), Filter-dropdown (score-range, kilde, dato, domene), Visningsvalg (tabell / kort), Eksporter valgte.</li>
+      <li><strong>Tabell-kolonner:</strong> Avkrysning · E-post (mono-font, kopiérbart ved hover) · Domene · Score (farget badge) · Kilde · Funnet · Handlinger (ikon-knapper).</li>
+      <li><strong>Rad-utvidelse:</strong> Klikk på rad → utvides til detaljpanel med alle felt, WHOIS-data, validerings-historikk. Ingen navigering bort fra siden.</li>
+      <li><strong>Bulkhandlinger:</strong> Velg N leads → "Eksporter (N)" / "Merk som kontaktet" / "Slett" vises i sticky bar nedest.</li>
+      <li><strong>Score-kolonnen:</strong> 0–100 skala. 80–100 = grønn, 50–79 = gul, &lt;50 = rød. Score er alltid mono-font.</li>
+    </ul>
+
+    <h3>Kilder-siden <span class="tag tag-blue">Høy prioritet</span></h3>
+    <ul>
+      <li><strong>Kilde-kort (grid 3×N):</strong> Kilde-navn, ikon, siste kjøring-dato, helse-status, antall leads produsert totalt.</li>
+      <li><strong>Rediger kilde:</strong> Slide-over panel fra høyre (ikke full-side navigering). Lagre / Avbryt / Test kilde-knapp.</li>
+      <li><strong>Ny kilde-wizard:</strong> 3-stegs modal: Velg type → Konfigurer → Test + Lagre.</li>
+      <li><strong>Live helse-indikator:</strong> Pulserende grønn/rød prikk. Tooltip viser responstid og siste 5 resultater.</li>
+    </ul>
+
+    <h3>Kjøringer-siden <span class="tag tag-yellow">Kritisk for workflow</span></h3>
+    <ul>
+      <li><strong>Aktive kjøringer:</strong> Øverst med live fremdriftslinje og ETA. Klikk → real-time logg-visning.</li>
+      <li><strong>Historikk-tabell:</strong> ID, Startdato, Varighet, Antall leads, Status, Handlinger. Søkbar og sorterbar.</li>
+      <li><strong>Ny kjøring:</strong> Slide-over panel: Velg kilder → Sett grenser → Avanserte innstillinger → Start.</li>
+      <li><strong>Kjørings-logg (detaljsiden):</strong> Scrollbar logg med timestamps, nivå-farger (info/warn/error), søk i logg.</li>
+    </ul>
+
+    <h3>Analytics-siden <span class="tag tag-purple">AI-drevet</span></h3>
+    <ul>
+      <li><strong>Score-distribusjon:</strong> Histogram over alle leads' confidence-score. Identifiserer outliers.</li>
+      <li><strong>Kilde-sammenligning:</strong> Bar chart — leads per kilde, gjennomsnittlig score per kilde.</li>
+      <li><strong>Tidsanalyse:</strong> Area chart — volum over tid, periodiske mønstre (best tidspunkt å kjøre).</li>
+      <li><strong>Domene-analyse:</strong> Treemap eller packed circles — hvilke domener dominerer lead-databasen.</li>
+      <li><strong>Export-rapport:</strong> Generer PDF/Excel-rapport av valgt tidsrom med ett klikk.</li>
+    </ul>
+
+    <h3>Innstillinger <span class="tag tag-blue">Utility</span></h3>
+    <p>To-panel-layout: Venstre = innstillings-kategorier (Profil, API-nøkler, Varsler, GDPR, Team, Abonnement). Høyre = innhold for valgt kategori. Lagring er optimistisk med toast-notifikasjon.</p>
+
+    <h3>Playbooks <span class="tag tag-purple">Avansert</span></h3>
+    <p>Visuelle workflow-builder inspirert av n8n/Zapier, men sterkt forenklet. Drag-and-drop noder: Trigger → Kilde → Filter → Scoring → Export. Kjøres manuelt eller planlagt (cron).</p>
+  </div>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- 08 — Søk og kommandosentral -->
+  <!-- ══════════════════════════════════════════ -->
+  <div class="section" id="s8">
+    <div class="section-num">08 / 12</div>
+    <h2>Søk og kommandosentral</h2>
+
+    <p>En kraftfull kommandopalette (<code>⌘K</code>) er det mest produktivitets-boosting elementet i et avansert dashboard. Den erstatter menynavigering for power-brukere og gir superkrefter til alle.</p>
+
+    <h3>Kommandopalette — hva den støtter</h3>
+    <div class="card-grid card-grid-2">
+      <div class="card">
+        <h4>Navigasjon</h4>
+        <p>"Gå til Dashboard", "Åpne Leads", "Innstillinger → API-nøkler"</p>
+      </div>
+      <div class="card">
+        <h4>Handlinger</h4>
+        <p>"Ny kjøring", "Eksporter rapport", "Importer CSV", "Kopier API-nøkkel"</p>
+      </div>
+      <div class="card">
+        <h4>Søk</h4>
+        <p>Søk i leads (e-post, domene), søk i kjøringer, søk i kilde-navn</p>
+      </div>
+      <div class="card">
+        <h4>Innstillinger</h4>
+        <p>"Bytt til mørkt tema", "Endre språk", "Tøm cache", "Vis snarvei-hjelp"</p>
+      </div>
+    </div>
+
+    <h3>Global søk — oppførsel</h3>
+    <ul>
+      <li>Åpnes med <code>/</code> fra leads-tabellen (in-context søk) eller <code>⌘K</code> globalt.</li>
+      <li>Real-time resultater mens bruker skriver, <strong>debounced 200ms</strong>.</li>
+      <li>Resultater gruppert: "Leads", "Kjøringer", "Sider", "Handlinger".</li>
+      <li>Tastaturnavigasjon: pil opp/ned for å velge, Enter for å gå.</li>
+      <li>Escape lukker alltid uten sideeffekter.</li>
+      <li>Søkehistorikk (siste 10 søk) vises når paletten åpnes uten tekst.</li>
+    </ul>
+
+    <div class="callout">
+      <strong>Bruk cmdk:</strong> Biblioteket <code>cmdk</code> fra Vercel er allerede tilgjengelig via shadcn/ui. Det gir ferdig tilgjengelig kommandopalette med null konfigurasjon.
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- 09 — Datavisualisering -->
+  <!-- ══════════════════════════════════════════ -->
+  <div class="section" id="s9">
+    <div class="section-num">09 / 12</div>
+    <h2>Datavisualisering</h2>
+
+    <p>OSINT-data er komplekst. Visualisering handler ikke om å imponere — det handler om å avdekke mønstre som tabeller ikke kan vise. Bruk <strong>Recharts</strong> (allerede i Next.js-prosjekter) eller <strong>Tremor</strong> for klar-til-bruk chart-komponenter.</p>
+
+    <h3>Anbefalte charttyper per brukstilfelle</h3>
+    <table>
+      <thead><tr><th>Brukstilfelle</th><th>Charttype</th><th>Biblikotek</th></tr></thead>
+      <tbody>
+        <tr><td>Leads over tid</td><td>Area chart med gradient</td><td>Recharts AreaChart</td></tr>
+        <tr><td>KPI-trend mini</td><td>Sparkline (inline, 60px høy)</td><td>Recharts LineChart</td></tr>
+        <tr><td>Score-distribusjon</td><td>Bar chart / Histogram</td><td>Recharts BarChart</td></tr>
+        <tr><td>Kilde-sammenligning</td><td>Horizontal bar chart</td><td>Recharts BarChart</td></tr>
+        <tr><td>Domene-fordeling</td><td>Treemap</td><td>Recharts Treemap</td></tr>
+        <tr><td>System-helse over tid</td><td>Multi-line chart</td><td>Recharts ComposedChart</td></tr>
+        <tr><td>Kjøre-frekvens (kalender)</td><td>Heatmap calendar</td><td>react-calendar-heatmap</td></tr>
+        <tr><td>Funnel (søk→validert→eksportert)</td><td>Funnel chart</td><td>Recharts FunnelChart</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Designregler for charts</h3>
+    <ul>
+      <li><strong>Bakgrunn alltid transparent</strong> — chartet smelter inn i kortet det er i.</li>
+      <li><strong>Grid-linjer diskrete</strong> — <code>stroke="#30363D"</code>, <code>strokeDasharray="2 4"</code>. Aldri dominerende.</li>
+      <li><strong>Tooltip-design</strong> — Mørk bakgrunn, border 1px solid grå, mono-font for tall. Posisjon følger mus, aldri utenfor viewport.</li>
+      <li><strong>Tomme grafer</strong> — Vis silhuett av hva grafen vil se ut med data, med "Ingen data ennå"-overlay.</li>
+      <li><strong>Animasjon ved mount</strong> — Framer Motion <code>isAnimationActive</code> fra venstre. Varighet max 600ms.</li>
+      <li><strong>Responsivitet</strong> — Alltid bruk <code>ResponsiveContainer</code> fra Recharts.</li>
+    </ul>
+
+    <h3>KPI-kort — spec</h3>
+    <table>
+      <thead><tr><th>Element</th><th>Spec</th></tr></thead>
+      <tbody>
+        <tr><td>Tittel</td><td>12px, uppercase, letter-spacing 0.08em, muted farge</td></tr>
+        <tr><td>Tallverdi</td><td>32px, font-weight 700, tabular nums, hvit</td></tr>
+        <tr><td>Endring vs forrige periode</td><td>+12% grønn ▲ / -5% rød ▼ / =0% grå</td></tr>
+        <tr><td>Sparkline</td><td>60px høy, area chart, ingen akser, ingen labels</td></tr>
+        <tr><td>Ikon</td><td>20px, farge = aksentfarge for den KPI-en</td></tr>
+        <tr><td>Loading state</td><td>Skeleton pulse, ikke spinner. Unngår layouthopp.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- 10 — Mikrointeraksjoner -->
+  <!-- ══════════════════════════════════════════ -->
+  <div class="section" id="s10">
+    <div class="section-num">10 / 12</div>
+    <h2>Mikrointeraksjoner og animasjon</h2>
+
+    <p>God animasjon er usynlig. Den hjelper brukeren å forstå hva som skjer — ikke for å imponere. Dårlig animasjon er treg og forstyrrer.</p>
+
+    <h3>Animasjonsprinsipper</h3>
+    <div class="card-grid card-grid-3">
+      <div class="card">
+        <h4>Rask respons</h4>
+        <p>UI-tilbakemelding innen 100ms. Hover: 120ms. Slide-over: 220ms ease-out.</p>
+      </div>
+      <div class="card">
+        <h4>Purposeful</h4>
+        <p>Animer kun for å kommunisere noe: ny data, tilstand-endring, suksess/feil.</p>
+      </div>
+      <div class="card">
+        <h4>Reducible</h4>
+        <p>Respekter <code>prefers-reduced-motion</code>. All animasjon skrues av med en CSS-query.</p>
+      </div>
+    </div>
+
+    <h3>Framer Motion — ferdig patterns for dette prosjektet</h3>
+    <table>
+      <thead><tr><th>Situasjon</th><th>Animasjon</th><th>Varighet</th></tr></thead>
+      <tbody>
+        <tr><td>Slide-over panel (Rediger kilde)</td><td><code>x: "100%" → 0</code> ease-out</td><td>220ms</td></tr>
+        <tr><td>Modal åpner</td><td>Scale <code>0.95 → 1</code> + fade in</td><td>180ms</td></tr>
+        <tr><td>Toast notifikasjon</td><td>Slide inn fra høyre, ut etter 4s</td><td>200ms</td></tr>
+        <tr><td>Ny rad i tabell</td><td>Fade + translateY(<code>-8px → 0</code>)</td><td>250ms</td></tr>
+        <tr><td>KPI-tall oppdateres</td><td>Count-up animation via <code>react-countup</code></td><td>600ms</td></tr>
+        <tr><td>Page transitions</td><td>Fade (ikke slide). Slide kan gi sjøsyke.</td><td>150ms</td></tr>
+        <tr><td>Loading skeleton</td><td>Shimmer gradient venstre→høyre</td><td>1.5s loop</td></tr>
+        <tr><td>Suksess-ikon (kjøring ferdig)</td><td>Scale 0 → 1.2 → 1 (bounce)</td><td>400ms</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Optimistisk UI — regler</h3>
+    <ul>
+      <li><strong>Alltid optimitisk for POST-handlinger</strong> som er lav-risiko: "Merk som kontaktet", "Endre navn".</li>
+      <li>Vis umiddelbar oppdatering, rull tilbake diskret ved API-feil med en toast.</li>
+      <li><strong>Aldri optimistisk for destruktive operasjoner</strong>: Slett, Tilbakestill.</li>
+      <li>Bekreftelsesdialog for alle slett-operasjoner — aldri native <code>window.confirm</code>.</li>
+    </ul>
+  </div>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- 11 — Tilgjengelighet og ytelse -->
+  <!-- ══════════════════════════════════════════ -->
+  <div class="section" id="s11">
+    <div class="section-num">11 / 12</div>
+    <h2>Tilgjengelighet og ytelse</h2>
+
+    <h3>Tilgjengelighetskrav (WCAG 2.1 AA)</h3>
+    <table>
+      <thead><tr><th>Krav</th><th>Implementering</th></tr></thead>
+      <tbody>
+        <tr><td>Kontrastratio tekst på bakgrunn</td><td>Minimum 4.5:1. Sjekk alle farge-kombinasjoner med Contrast Checker.</td></tr>
+        <tr><td>Tastaturnavigasjon</td><td>Alle interaktive elementer nås med Tab. Focus-ring alltid synlig (2px blå outline).</td></tr>
+        <tr><td>Skjermleser-støtte</td><td>Semantisk HTML, ARIA-labels på alle ikoner uten synlig tekst.</td></tr>
+        <tr><td>Feilmeldinger</td><td>Alltid inline ved feltene, ikke bare farge-indikasjon.</td></tr>
+        <tr><td>Animasjon</td><td><code>@media (prefers-reduced-motion: reduce)</code> skruer av alle animasjoner.</td></tr>
+        <tr><td>Touch-mål</td><td>Minimum 44×44px for alle klikk-elementer på mobil.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Ytelsesmål</h3>
+    <table>
+      <thead><tr><th>Metrikk</th><th>Mål</th><th>Strategi</th></tr></thead>
+      <tbody>
+        <tr><td>LCP (Largest Contentful Paint)</td><td>&lt; 1.5s</td><td>Server-rendered shell, streamed content</td></tr>
+        <tr><td>CLS (Cumulative Layout Shift)</td><td>&lt; 0.1</td><td>Skeleton loaders med faste dimensjoner</td></tr>
+        <tr><td>INP (Interaction to Next Paint)</td><td>&lt; 200ms</td><td>Optimistisk UI, deferred non-critical updates</td></tr>
+        <tr><td>Bundle størrelse (initial JS)</td><td>&lt; 200KB gzipped</td><td>Code splitting per side, lazy-load charts</td></tr>
+        <tr><td>API responstid (lokalt)</td><td>&lt; 100ms</td><td>React Query caching, stale-while-revalidate</td></tr>
+      </tbody>
+    </table>
+
+    <h3>React Query — caching-strategi</h3>
+    <ul>
+      <li><code>staleTime: 30000</code> (30s) for KPI-data — akseptabel latency for dashboarddata.</li>
+      <li><code>staleTime: 60000</code> (1min) for leads-liste — unngår unødvendige refetches ved tabellsortering.</li>
+      <li><code>staleTime: 0</code> for kjøringsstatus — alltid fersk, polling hvert 5. sekund for aktive kjøringer.</li>
+      <li><strong>Optimistisk invalidering:</strong> Etter POST/PUT/DELETE, invalider relevante query-nøkler umiddelbart.</li>
+    </ul>
+  </div>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- 12 — Prioriteringer -->
+  <!-- ══════════════════════════════════════════ -->
+  <div class="section" id="s12">
+    <div class="section-num">12 / 12</div>
+    <h2>Implementeringsprioriteringer</h2>
+
+    <p>Ikke alt kan gjøres på én gang. Her er en prioritert liste basert på bruksverdi, synergi og visuell impact.</p>
+
+    <ul class="priority-list">
+      <li class="priority-item">
+        <span class="priority-badge p1">P1</span>
+        <div class="priority-item-text"><strong>Fargesystem + CSS-tokens</strong> — Implementer riktige CSS custom properties for dark mode. Switche fra grå-skala til ekte OSINT-tema (#0F1117, #161B22, #0A84FF). Dette endrer alt med minimal kodeinnsats.</div>
+      </li>
+      <li class="priority-item">
+        <span class="priority-badge p1">P1</span>
+        <div class="priority-item-text"><strong>KPI-kort med sparklines</strong> — Bytt ut de enkle kortene med fullverdige KPI-kort: stor tallvisning, trend-pil, og sparkline-graf. Bruker skjønner systemets helse på 3 sekunder.</div>
+      </li>
+      <li class="priority-item">
+        <span class="priority-badge p1">P1</span>
+        <div class="priority-item-text"><strong>Leads-tabell polish</strong> — Legg til score-badge med farge, rad-utvidelse med detaljer, og bulk-velg-funksjonalitet. Dette er siden brukere bruker 60% av tiden sin på.</div>
+      </li>
+      <li class="priority-item">
+        <span class="priority-badge p1">P1</span>
+        <div class="priority-item-text"><strong>Sidebar collapse + persistering</strong> — Legg til toggle for sidebar. Smal modus (64px) med kun ikoner. Brukerpreferanse lagret i localStorage. Gir 240px ekstra arbeidsflate.</div>
+      </li>
+      <li class="priority-item">
+        <span class="priority-badge p2">P2</span>
+        <div class="priority-item-text"><strong>Kommandopalette (⌘K)</strong> — Implement cmdk-basert søk. Navigasjon, handlinger og lead-søk fra én plass. Power-brukere vil elske dette og det hever opplevd eksklusivitet dramatisk.</div>
+      </li>
+      <li class="priority-item">
+        <span class="priority-badge p2">P2</span>
+        <div class="priority-item-text"><strong>Toast-notifikasjoner</strong> — Bytt ut alle alerts/errors med sonner-baserte toasts. Suksess (grønn), advarsel (gul), feil (rød). Konsistent, ikke-blokkerende tilbakemelding.</div>
+      </li>
+      <li class="priority-item">
+        <span class="priority-badge p2">P2</span>
+        <div class="priority-item-text"><strong>Slide-over panels</strong> — Rediger-skjema for Kilde, Kjøring, Lead skal åpne i slide-over fra høyre, ikke navigere til ny side. Bevarer kontekst og føles moderne.</div>
+      </li>
+      <li class="priority-item">
+        <span class="priority-badge p2">P2</span>
+        <div class="priority-item-text"><strong>Dashboard area-chart</strong> — Bytt ut den enkle tabellen med en interaktiv area-chart for leads over tid. Recharts AreaChart med gradient fill og hover-tooltip.</div>
+      </li>
+      <li class="priority-item">
+        <span class="priority-badge p3">P3</span>
+        <div class="priority-item-text"><strong>Analytics-side</strong> — Score-distribusjon histogram, kilde-sammenligning, domene-treemap. Dataintelligens-lag som skiller produktet fra enkle lead-lister.</div>
+      </li>
+      <li class="priority-item">
+        <span class="priority-badge p3">P3</span>
+        <div class="priority-item-text"><strong>Tastatur-snarveier (alle G-navigasjoner)</strong> — Implementer globale snarvei-hooks. G+D, G+L, etc. Vis snarvei-overlay med ? som trigger. Gjør avanserte brukere ekstremt effektive.</div>
+      </li>
+      <li class="priority-item">
+        <span class="priority-badge p3">P3</span>
+        <div class="priority-item-text"><strong>Kilde-helseindikator med live polling</strong> — Pulserende grønn/rød prikk på kilde-kort med 30s polling. Overvåking i sanntid uten å forlate siden.</div>
+      </li>
+    </ul>
+
+    <hr>
+
+    <div class="callout callout-success">
+      <strong>Den gylne regelen for dette prosjektet:</strong> Start med farge og typografi (P1). En godt stylet shell er det som skaper det første "wow"-inntrykket. Deretter KPI-kort. Deretter kommandopalette. Tre sprinter — produktet ser 10× bedre ut.
+    </div>
+
+    <h3>Tekniske anbefalinger — summary</h3>
+    <table>
+      <thead><tr><th>Komponent</th><th>Anbefalt løsning</th><th>Alternativ</th></tr></thead>
+      <tbody>
+        <tr><td>Kommandopalette</td><td><code>cmdk</code> (via shadcn/ui)</td><td>kbar</td></tr>
+        <tr><td>Grafer / charts</td><td><code>recharts</code></td><td>tremor, visx</td></tr>
+        <tr><td>Toast-notifikasjoner</td><td><code>sonner</code></td><td>react-hot-toast</td></tr>
+        <tr><td>Tabeller (avansert)</td><td><code>@tanstack/react-table</code> v8</td><td>AG Grid (overkill)</td></tr>
+        <tr><td>Dato-picker</td><td><code>react-day-picker</code> (shadcn)</td><td>—</td></tr>
+        <tr><td>Animasjoner</td><td><code>framer-motion</code> (allerede installert)</td><td>—</td></tr>
+        <tr><td>Form-håndtering</td><td><code>react-hook-form</code> + <code>zod</code></td><td>—</td></tr>
+        <tr><td>State management</td><td><code>zustand</code> (allerede installert)</td><td>—</td></tr>
+        <tr><td>Ikoner</td><td><code>lucide-react</code> (allerede installert)</td><td>—</td></tr>
+        <tr><td>Data fetching</td><td><code>@tanstack/react-query</code> (allerede installert)</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <hr>
+  <p style="text-align:center; color: var(--text2); font-size:12px; margin-top:32px;">
+    Nova Trace — Konfidensielt designdokument · Mai 2026 · v1.0
+  </p>
+
+</div>
+
+<script>
+  // ─── Copy report as markdown ───
+  function copyReport() {
+    const btn = document.getElementById('copyBtn');
+    const content = document.getElementById('report-content');
+
+    // Convert HTML to clean markdown-ish text
+    const lines = [];
+    lines.push('# Nova Trace — Frontend Designrapport');
+    lines.push('> Konfidensielt designdokument · Mai 2026 · v1.0');
+    lines.push('');
+    lines.push('**Stack:** Next.js 14 · Tailwind · shadcn/ui · Framer Motion');
+    lines.push('**Mål:** Pro B2B OSINT dashboard');
+    lines.push('');
+    lines.push('---');
+    lines.push('');
+
+    function processNode(node) {
+      if (!node) return;
+      const tag = node.tagName?.toLowerCase();
+
+      if (tag === 'script' || tag === 'style') return;
+      if (node.classList?.contains('topbar')) return;
+      if (node.classList?.contains('toc')) return;
+
+      if (tag === 'h2') {
+        lines.push('');
+        lines.push('## ' + node.textContent.trim());
+        lines.push('');
+        return;
+      }
+      if (tag === 'h3') {
+        lines.push('');
+        lines.push('### ' + node.textContent.trim());
+        lines.push('');
+        return;
+      }
+      if (tag === 'h4') {
+        lines.push('**' + node.textContent.trim() + '**');
+        lines.push('');
+        return;
+      }
+      if (tag === 'p') {
+        const t = node.textContent.trim();
+        if (t) { lines.push(t); lines.push(''); }
+        return;
+      }
+      if (tag === 'li') {
+        lines.push('- ' + node.textContent.trim());
+        return;
+      }
+      if (tag === 'tr') {
+        const cells = Array.from(node.querySelectorAll('td, th')).map(c => c.textContent.trim());
+        if (cells.length) {
+          lines.push('| ' + cells.join(' | ') + ' |');
+          if (node.parentElement?.tagName.toLowerCase() === 'thead') {
+            lines.push('| ' + cells.map(() => '---').join(' | ') + ' |');
+          }
+        }
+        return;
+      }
+      if (tag === 'table') {
+        node.childNodes.forEach(processNode);
+        lines.push('');
+        return;
+      }
+      if (tag === 'hr') { lines.push('---'); lines.push(''); return; }
+      if (tag === 'ul' || tag === 'ol') {
+        node.childNodes.forEach(processNode);
+        lines.push('');
+        return;
+      }
+      if (tag === 'thead' || tag === 'tbody') {
+        node.childNodes.forEach(processNode);
+        return;
+      }
+      if (node.classList?.contains('callout')) {
+        lines.push('> ' + node.textContent.trim().replace(/\n+/g, ' '));
+        lines.push('');
+        return;
+      }
+      if (node.classList?.contains('section')) {
+        node.childNodes.forEach(processNode);
+        lines.push('---');
+        lines.push('');
+        return;
+      }
+      if (node.childNodes?.length) {
+        node.childNodes.forEach(processNode);
+      }
+    }
+
+    const sections = content.querySelectorAll('.section');
+    sections.forEach(section => processNode(section));
+
+    const text = lines.join('\n');
+
+    navigator.clipboard.writeText(text).then(() => {
+      btn.classList.add('copied');
+      btn.innerHTML = `
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        Kopiert!`;
+      setTimeout(() => {
+        btn.classList.remove('copied');
+        btn.innerHTML = `
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+          </svg>
+          Kopier rapport`;
+      }, 2500);
+    }).catch(() => {
+      alert('Åpne siden i en nettleser for å bruke kopierfunksjonen.');
+    });
+  }
+
+  // ─── Scroll-to-top button ───
+  const backTop = document.getElementById('back-top');
+  window.addEventListener('scroll', () => {
+    backTop.style.display = window.scrollY > 500 ? 'block' : 'none';
+  });
+
+  // ─── Smooth scroll for TOC links ───
+  document.querySelectorAll('.toc-list a').forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      const id = link.getAttribute('href').slice(1);
+      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+    });
+  });
+</script>
+</body>
+</html>

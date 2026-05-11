@@ -120,7 +120,7 @@ async def get_current_user_from_token(
         rows = db.execute_query(
             """
             SELECT id, email, username, full_name, role, is_active,
-                   is_verified, hashed_password, last_login, login_count
+                   is_verified, hashed_password, last_login_at, login_count
             FROM users
             WHERE id = ?
             LIMIT 1
