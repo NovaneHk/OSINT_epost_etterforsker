@@ -92,6 +92,19 @@ const config: Config = {
   				'3': 'hsl(var(--chart-3))',
   				'4': 'hsl(var(--chart-4))',
   				'5': 'hsl(var(--chart-5))'
+  			},
+  			nova: {
+  				bg: 'var(--nt-bg)',
+  				surface: 'var(--nt-surface)',
+  				'surface-elevated': 'var(--nt-surface-elevated)',
+  				border: 'var(--nt-border)',
+  				'text-primary': 'var(--nt-text-primary)',
+  				'text-secondary': 'var(--nt-text-secondary)',
+  				accent: 'var(--nt-accent)',
+  				success: 'var(--nt-success)',
+  				warning: 'var(--nt-warning)',
+  				danger: 'var(--nt-danger)',
+  				ai: 'var(--nt-ai)',
   			}
   		},
   		borderRadius: {

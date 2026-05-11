@@ -29,6 +29,9 @@ export async function middleware(request: NextRequest) {
     const token = request.cookies.get('token')?.value;
     const currentPath = request.nextUrl.pathname;
     const normalizedPath = currentPath.replace(/^\/(nb|en)(?=\/|$)/, '') || '/';
+    const host = request.nextUrl.hostname;
+    const isLocalhost = host === 'localhost' || host === '127.0.0.1';
+    const devBypassEnabled = process.env.NEXT_PUBLIC_DEV_AUTO_LOGIN === 'true' || process.env.NODE_ENV !== 'production';
 
     // Check if we're on a protected route
     const isProtectedRoute = protectedRoutes.some(route => 
@@ -37,6 +40,15 @@ export async function middleware(request: NextRequest) {
 
     const isProtectedRoot = normalizedPath === '/';
     const isPublicRoute = normalizedPath === '/login' || normalizedPath === '/forgot-password' || normalizedPath === '/register';
+
+    if (devBypassEnabled && normalizedPath === '/login') {
+        const dashboardUrl = new URL('/dashboard', request.url);
+        return NextResponse.redirect(dashboardUrl);
+    }
+
+    if (devBypassEnabled && (isProtectedRoute || isProtectedRoot)) {
+        return NextResponse.next();
+    }
 
     if (!isPublicRoute && (isProtectedRoute || isProtectedRoot) && !token) {
         // Redirect to login page if no token is found
@@ -59,6 +71,8 @@ export const config = {
     matcher: [
         // Match all routes for internationalization
         '/',
+        '/login',
+        '/login/:path*',
         '/(nb|en)/:path*',
         // Match protected routes for authentication
         '/analytics/:path*',

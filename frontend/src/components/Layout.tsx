@@ -17,7 +17,7 @@ export default function Layout({ children }: LayoutProps) {
                         <div className="flex">
                             <div className="flex-shrink-0 flex items-center">
                                 <Link href="/" className="text-xl font-bold text-gray-800">
-                                    OSINT Email Investigator
+                                    Nova Trace
                                 </Link>
                             </div>
                             {user && (

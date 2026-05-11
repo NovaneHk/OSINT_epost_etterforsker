@@ -378,7 +378,7 @@ export default function PlaybooksPage() {
                     <div className="text-center py-8 border-2 border-dashed border-muted rounded-lg">
                       <BookOpen className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
                       <p className="text-muted-foreground">Ingen steg lagt til ennå</p>
-                      <p className="text-sm text-muted-foreground">Klikk "Legg til steg" for å begynne</p>
+                      <p className="text-sm text-muted-foreground">Klikk &quot;Legg til steg&quot; for å begynne</p>
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -741,7 +741,7 @@ export default function PlaybooksPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Er du sikker?</AlertDialogTitle>
             <AlertDialogDescription>
-              Dette vil permanent slette playbook-en "{playbookToDelete?.name}" og alle tilhørende data.
+              Dette vil permanent slette playbook-en &quot;{playbookToDelete?.name}&quot; og alle tilhørende data.
               Denne handlingen kan ikke angres.
             </AlertDialogDescription>
           </AlertDialogHeader>

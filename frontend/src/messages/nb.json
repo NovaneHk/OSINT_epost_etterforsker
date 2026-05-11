@@ -33,7 +33,7 @@
   },
   "dashboard": {
     "title": "Dashboard",
-    "welcomeMessage": "Velkommen til OSINT Lead Generator",
+    "welcomeMessage": "Velkommen til Nova Trace",
     "kpis": {
       "leads7d": "Leads (7d)",
       "hits7d": "Treff (7d)",

@@ -67,7 +67,7 @@ export class ErrorBoundary extends Component<Props, State> {
               </div>
               <CardTitle className="text-xl">Something went wrong</CardTitle>
               <CardDescription>
-                An unexpected error occurred. We're sorry for the inconvenience.
+                An unexpected error occurred. We&apos;re sorry for the inconvenience.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -205,7 +205,7 @@ export function PageErrorBoundary({ children }: { children: ReactNode }) {
               <AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-2" />
               <CardTitle className="text-lg">Page Error</CardTitle>
               <CardDescription>
-                This page encountered an error and couldn't load properly.
+                This page encountered an error and couldn&apos;t load properly.
               </CardDescription>
             </CardHeader>
             <CardContent>

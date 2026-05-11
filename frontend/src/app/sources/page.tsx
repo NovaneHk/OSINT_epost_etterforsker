@@ -719,7 +719,7 @@ export default function SourcesPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Er du sikker?</AlertDialogTitle>
             <AlertDialogDescription>
-              Dette vil permanent slette kilden "{sourceToDelete?.name}" og alle tilhørende data.
+              Dette vil permanent slette kilden &quot;{sourceToDelete?.name}&quot; og alle tilhørende data.
               Denne handlingen kan ikke angres.
             </AlertDialogDescription>
           </AlertDialogHeader>

@@ -11,6 +11,7 @@ import { LoadingProvider } from '@/components/providers/loading-provider';
 import { AuthBootstrap } from '@/components/providers/auth-bootstrap';
 import { AppShell } from '@/components/layout/app-shell';
 import { GdprBanner } from '@/components/GdprBanner';
+import { Toaster } from 'sonner';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -33,26 +34,26 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: 'OSINT Lead Generator',
-    template: '%s | OSINT Lead Generator',
+    default: 'Nova Trace',
+    template: '%s | Nova Trace',
   },
-  description: 'Profesjonell B2B lead-generering med OSINT-teknikker',
-  keywords: ['OSINT', 'B2B', 'Lead Generation', 'Intelligence', 'Norge'],
-  authors: [{ name: 'OSINT Team' }],
-  creator: 'OSINT Lead Generator',
+  description: 'Profesjonell B2B e-post etterforskning og lead-intelligens',
+  keywords: ['OSINT', 'B2B', 'Lead Generation', 'Intelligence', 'Norge', 'Nova Trace'],
+  authors: [{ name: 'Nova Trace' }],
+  creator: 'Nova Trace',
   metadataBase: new URL('http://localhost:3000'),
   openGraph: {
     type: 'website',
     locale: 'nb_NO',
     url: 'http://localhost:3000',
-    title: 'OSINT Lead Generator',
-    description: 'Profesjonell B2B lead-generering med OSINT-teknikker',
-    siteName: 'OSINT Lead Generator',
+    title: 'Nova Trace',
+    description: 'Profesjonell B2B e-post etterforskning og lead-intelligens',
+    siteName: 'Nova Trace',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'OSINT Lead Generator',
-    description: 'Profesjonell B2B lead-generering med OSINT-teknikker',
+    title: 'Nova Trace',
+    description: 'Profesjonell B2B e-post etterforskning og lead-intelligens',
   },
   robots: {
     index: false,
@@ -70,15 +71,14 @@ interface RootLayoutProps {
 
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
-    <html lang="nb" suppressHydrationWarning>
+    <html lang="nb" className="dark" suppressHydrationWarning>
       <body
         className={`${inter.variable} ${poppins.variable} ${jetbrainsMono.variable} font-sans antialiased`}
       >
         <I18nProvider>
           <ThemeProvider
             attribute="class"
-            defaultTheme="system"
-            enableSystem
+            defaultTheme="dark"
             disableTransitionOnChange
           >
             <ErrorProvider>
@@ -88,6 +88,7 @@ export default function RootLayout({ children }: RootLayoutProps) {
                   <KeyboardShortcutsProvider>
                     <AppShell>{children}</AppShell>
                     <ToastProvider />
+                    <Toaster richColors position="bottom-right" />
                     <GdprBanner />
                   </KeyboardShortcutsProvider>
                 </QueryProvider>

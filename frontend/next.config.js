@@ -10,8 +10,8 @@ const nextConfig = {
 
   // Experimental features
   experimental: {
-    // Optimize bundle size
-    optimizeCss: true,
+    // optimizeCss disabled: critters breaks Tailwind JIT in dev mode
+    // optimizeCss: true,
   },
 
   // Compiler options

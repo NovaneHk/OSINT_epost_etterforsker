@@ -2,6 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─── Nova Trace design tokens ──────────────────────────────────────────── */
+:root {
+  --nt-bg: #0F1117;
+  --nt-surface: #161B22;
+  --nt-surface-elevated: #1C2128;
+  --nt-border: #30363D;
+  --nt-text-primary: #F0F6FC;
+  --nt-text-secondary: #8B949E;
+  --nt-accent: #0A84FF;
+  --nt-success: #3FB950;
+  --nt-warning: #D29922;
+  --nt-danger: #F85149;
+  --nt-ai: #BC8CFF;
+}
+
 @layer base {
   :root {
     /* Light mode - Premium OSINT theme */
@@ -33,30 +48,35 @@
     --osint-success: 142 71% 45%; /* #10B981 */
     --osint-warning: 38 92% 50%; /* #F59E0B */
     --osint-error: 0 84% 60%; /* #EF4444 */
-    --osint-info: 217 91% 60%; /* #3B82F6 */ --chart-1: 12 76% 61%; --chart-2: 173 58% 39%; --chart-3: 197 37% 24%; --chart-4: 43 74% 66%; --chart-5: 27 87% 67%;
+    --osint-info: 217 91% 60%; /* #3B82F6 */
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
   }
 
   .dark {
-    /* Dark mode - Premium OSINT theme */
-    --background: 0 0% 3.9%; /* #0F172A */
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%; /* #1E293B */
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%; /* Keep same blue in dark mode */
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%; /* Keep same green */
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%; /* #334155 */
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
+    /* Dark mode - Nova Trace palette (#0F1117 bg, #161B22 surface, etc.) */
+    --background: 225 20% 7%;       /* #0F1117 */
+    --foreground: 210 67% 96%;      /* #F0F6FC */
+    --card: 214 20% 11%;            /* #161B22 */
+    --card-foreground: 210 67% 96%;
+    --popover: 214 18% 13%;         /* #1C2128 */
+    --popover-foreground: 210 67% 96%;
+    --primary: 213 100% 52%;        /* #0A84FF */
+    --primary-foreground: 210 67% 96%;
+    --secondary: 214 18% 13%;       /* #1C2128 */
+    --secondary-foreground: 210 67% 96%;
+    --muted: 213 12% 21%;           /* #30363D */
+    --muted-foreground: 213 9% 58%; /* #8B949E */
+    --accent: 213 100% 52%;         /* #0A84FF */
+    --accent-foreground: 210 67% 96%;
+    --destructive: 1 92% 64%;       /* #F85149 */
+    --destructive-foreground: 210 67% 96%;
+    --border: 213 12% 21%;          /* #30363D */
+    --input: 213 12% 21%;
+    --ring: 213 100% 52%;           /* #0A84FF */
 
     /* Dark mode specific overrides */
     --osint-primary: 213 100% 52%;
@@ -95,7 +115,9 @@
   }
 
   .text-balance {
-    text-wrap: balance;
+    @supports (text-wrap: balance) {
+      text-wrap: balance;
+    }
   }
 }
 

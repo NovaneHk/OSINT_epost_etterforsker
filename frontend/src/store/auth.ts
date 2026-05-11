@@ -25,6 +25,26 @@ export const useAuthStore = create<AuthStore>((set) => ({
             return;
         }
 
+        // Sprint 1 mock bypass: when dev auto-login is enabled, inject a mock user
+        // directly without calling /api/auth/me (which proxies to the real backend).
+        // Remove this block in Sprint 2 when the backend is connected.
+        if (process.env.NEXT_PUBLIC_DEV_AUTO_LOGIN === 'true') {
+            const username = process.env.NEXT_PUBLIC_DEV_AUTO_LOGIN_USERNAME || 'admin';
+            set({
+                user: {
+                    id: 'dev-user-1',
+                    email: `${username}@novatrace.io`,
+                    username,
+                    role: 'admin' as const,
+                    token: 'dev-mock-token',
+                },
+                isAuthenticated: true,
+                isLoading: false,
+                error: null,
+            });
+            return;
+        }
+
         const token = getCookie('token') || window.localStorage.getItem('accessToken');
         if (!token) {
             set({ ...initialState, isLoading: false });

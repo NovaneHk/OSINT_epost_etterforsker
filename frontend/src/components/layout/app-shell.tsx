@@ -1,49 +1,40 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import { SidebarNav } from '@/components/layout/sidebar-nav';
-import { TopNav } from '@/components/layout/top-nav';
-import { FloatingActions } from '@/components/layout/floating-actions';
-import { MobileNav } from '@/components/layout/mobile-nav';
+import { Sidebar } from '@/components/layout/sidebar';
+import { Topbar } from '@/components/layout/topbar';
 
 interface AppShellProps {
   children: React.ReactNode;
 }
 
+const AUTH_ROUTES = new Set(['/login', '/register', '/forgot-password']);
+
 function isAuthRoute(pathname: string): boolean {
-  const normalizedPath = pathname.replace(/^\/(nb|en)(?=\/|$)/, '') || '/';
-  return normalizedPath === '/login' || normalizedPath === '/forgot-password' || normalizedPath === '/register';
+  const normalized = pathname.replace(/^\/(nb|en)(?=\/|$)/, '') || '/';
+  return AUTH_ROUTES.has(normalized);
 }
 
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
 
   if (isAuthRoute(pathname)) {
-    return children;
+    return <>{children}</>;
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="flex h-screen">
-        <aside className="hidden w-64 border-r border-border bg-card lg:block">
-          <SidebarNav />
-        </aside>
+    <div className="flex h-screen overflow-hidden bg-nova-bg">
+      <Sidebar />
 
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <header className="border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-            <TopNav />
-          </header>
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <Topbar />
 
-          <main className="flex-1 overflow-auto pb-16 lg:pb-0">
-            <div className="container mx-auto px-4 py-6">
-              {children}
-            </div>
-          </main>
-        </div>
+        <main className="flex-1 overflow-auto bg-nova-bg">
+          <div className="mx-auto max-w-[1400px] px-8 py-8">
+            {children}
+          </div>
+        </main>
       </div>
-
-      <MobileNav />
-      <FloatingActions />
     </div>
   );
 }

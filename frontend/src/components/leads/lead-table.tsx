@@ -1,611 +1,350 @@
-'use client';
+﻿'use client';
 
-import React, { useState, useMemo, useCallback } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import React, { memo, useMemo } from 'react';
 import {
-  useReactTable,
+  flexRender,
   getCoreRowModel,
   getFilteredRowModel,
   getSortedRowModel,
-  ColumnDef,
-  flexRender,
-  Row,
-  SortingState,
-  ColumnFiltersState,
-  VisibilityState,
-  RowSelectionState,
+  useReactTable,
+  type ColumnDef,
+  type SortingState,
+  type RowSelectionState,
+  type Updater,
 } from '@tanstack/react-table';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuCheckboxItem,
-  DropdownMenuTrigger,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from '@/components/ui/dropdown-menu';
-import {
   ArrowUpDown,
-  ChevronDown,
-  Download,
-  Mail,
-  MoreHorizontal,
-  Settings,
-  Star,
-  Tag,
-  Trash2,
-  Eye,
+  ArrowUp,
+  ArrowDown,
   Copy,
-  ExternalLink
+  ChevronDown,
+  ChevronRight,
+  Users,
 } from 'lucide-react';
-import { formatDate, formatNumber, getInitials, getScoreColor } from '@/lib/utils';
-import type { Lead, FilterState, SortState } from '@/types/api';
+import { toast } from 'sonner';
+import type { Lead } from '@/lib/types';
+import { ScoreBadge } from '@/components/leads/score-badge';
+import { LeadStatusBadge } from '@/components/leads/lead-status-badge';
+import { LeadRowDetails } from '@/components/leads/lead-row-details';
+import { SkeletonBlock } from '@/components/shared/skeleton-block';
+import { EmptyState } from '@/components/shared/empty-state';
+import { formatDateShort } from '@/lib/format';
+import { cn } from '@/lib/utils';
 
 interface LeadTableProps {
   data: Lead[];
-  loading?: boolean;
-  totalCount?: number;
-  filters?: FilterState;
-  onFiltersChange?: (filters: FilterState) => void;
-  onSortChange?: (sort: SortState) => void;
-  onRowSelect?: (lead: Lead) => void;
-  onBulkAction?: (action: string, leadIds: string[]) => void;
-  onExport?: (leadIds?: string[]) => void;
-  className?: string;
+  isLoading?: boolean;
+  globalFilter: string;
+  sorting: SortingState;
+  onSortingChange: (sorting: SortingState) => void;
+  rowSelection: RowSelectionState;
+  onRowSelectionChange: (selection: RowSelectionState) => void;
+  expandedRowId: string | null;
+  onExpandedRowChange: (id: string | null) => void;
+  onMarkContacted: (id: string) => void;
 }
 
-export function LeadTable({
+function SortIcon({ sorted }: { sorted: false | 'asc' | 'desc' }) {
+  if (!sorted) return <ArrowUpDown className="ml-1 h-3.5 w-3.5 text-[var(--nt-text-secondary)] opacity-50" aria-hidden="true" />;
+  return sorted === 'asc'
+    ? <ArrowUp className="ml-1 h-3.5 w-3.5 text-[var(--nt-accent)]" aria-hidden="true" />
+    : <ArrowDown className="ml-1 h-3.5 w-3.5 text-[var(--nt-accent)]" aria-hidden="true" />;
+}
+
+export const LeadTable = memo(function LeadTable({
   data,
-  loading = false,
-  totalCount = 0,
-  filters,
-  onFiltersChange,
-  onSortChange,
-  onRowSelect,
-  onBulkAction,
-  onExport,
-  className = ''
+  isLoading,
+  globalFilter,
+  sorting,
+  onSortingChange,
+  rowSelection,
+  onRowSelectionChange,
+  expandedRowId,
+  onExpandedRowChange,
+  onMarkContacted,
 }: LeadTableProps) {
-  const [sorting, setSorting] = useState<SortingState>([]);
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
-  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
-
-  // Define columns
-  const columns = useMemo<ColumnDef<Lead>[]>(() => [
-    {
-      id: 'select',
-      header: ({ table }) => (
-        <Checkbox
-          checked={table.getIsAllPageRowsSelected()}
-          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-          aria-label="Velg alle"
-        />
-      ),
-      cell: ({ row }) => (
-        <Checkbox
-          checked={row.getIsSelected()}
-          onCheckedChange={(value) => row.toggleSelected(!!value)}
-          aria-label="Velg rad"
-        />
-      ),
-      enableSorting: false,
-      enableHiding: false,
-      size: 40,
-    },
-    {
-      accessorKey: 'name',
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-          className="h-8 px-2 lg:px-3"
-        >
-          Navn
-          <ArrowUpDown className="ml-2 h-4 w-4" />
-        </Button>
-      ),
-      cell: ({ row }) => {
-        const lead = row.original;
-        return (
-          <div className="flex items-center space-x-3 min-w-0">
-            <Avatar className="h-8 w-8 flex-shrink-0">
-              <AvatarImage src={`https://avatar.vercel.sh/${lead.email}`} />
-              <AvatarFallback className="text-xs">
-                {getInitials(lead.name || lead.email || 'UK')}
-              </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0">
-              <div className="font-medium truncate">{lead.name || 'Ukjent navn'}</div>
-              <div className="text-sm text-muted-foreground truncate">
-                {lead.email}
-              </div>
+  const columns = useMemo<ColumnDef<Lead>[]>(
+    () => [
+      {
+        id: 'select',
+        header: ({ table }) => (
+          <input
+            type="checkbox"
+            checked={table.getIsAllPageRowsSelected()}
+            ref={(el) => {
+              if (el) el.indeterminate = table.getIsSomePageRowsSelected();
+            }}
+            onChange={table.getToggleAllPageRowsSelectedHandler()}
+            aria-label="Select all leads"
+            className="h-4 w-4 cursor-pointer rounded border-[var(--nt-border)] accent-[var(--nt-accent)]"
+          />
+        ),
+        cell: ({ row }) => (
+          <input
+            type="checkbox"
+            checked={row.getIsSelected()}
+            onChange={row.getToggleSelectedHandler()}
+            onClick={(e) => e.stopPropagation()}
+            aria-label={`Select ${row.original.name}`}
+            className="h-4 w-4 cursor-pointer rounded border-[var(--nt-border)] accent-[var(--nt-accent)]"
+          />
+        ),
+        size: 40,
+        enableSorting: false,
+      },
+      {
+        id: 'email',
+        accessorKey: 'email',
+        header: ({ column }) => (
+          <button
+            className="flex items-center text-xs uppercase tracking-wider"
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+          >
+            Email
+            <SortIcon sorted={column.getIsSorted()} />
+          </button>
+        ),
+        cell: ({ row }) => (
+          <div className="flex min-w-0 flex-col">
+            <span className="truncate text-sm font-medium text-[var(--nt-text-primary)]">
+              {row.original.name}
+            </span>
+            <span className="truncate text-xs text-[var(--nt-text-secondary)]">
+              {row.original.email}
+            </span>
+          </div>
+        ),
+        size: 240,
+      },
+      {
+        id: 'domain',
+        accessorKey: 'domain',
+        header: ({ column }) => (
+          <button
+            className="flex items-center text-xs uppercase tracking-wider"
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+          >
+            Domain
+            <SortIcon sorted={column.getIsSorted()} />
+          </button>
+        ),
+        cell: ({ row }) => (
+          <span className="text-xs text-[var(--nt-text-secondary)]">
+            {row.original.domain}
+          </span>
+        ),
+        size: 160,
+      },
+      {
+        id: 'score',
+        accessorKey: 'score',
+        header: ({ column }) => (
+          <button
+            data-testid="confidence-header"
+            className="flex items-center text-xs uppercase tracking-wider"
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+          >
+            Score
+            <SortIcon sorted={column.getIsSorted()} />
+          </button>
+        ),
+        cell: ({ row }) => (
+          <span data-testid="confidence-score">
+            <ScoreBadge score={row.original.score} band={row.original.scoreBand} />
+          </span>
+        ),
+        size: 80,
+      },
+      {
+        id: 'sourceName',
+        accessorKey: 'sourceName',
+        header: () => <span className="text-xs uppercase tracking-wider">Source</span>,
+        cell: ({ row }) => (
+          <span className="text-xs text-[var(--nt-text-secondary)]">{row.original.sourceName}</span>
+        ),
+        size: 160,
+        enableSorting: false,
+      },
+      {
+        id: 'foundAt',
+        accessorKey: 'foundAt',
+        header: ({ column }) => (
+          <button
+            className="flex items-center text-xs uppercase tracking-wider"
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+          >
+            Found
+            <SortIcon sorted={column.getIsSorted()} />
+          </button>
+        ),
+        cell: ({ row }) => (
+          <span className="text-xs text-[var(--nt-text-secondary)]" title={row.original.foundAt}>
+            {formatDateShort(row.original.foundAt)}
+          </span>
+        ),
+        size: 90,
+      },
+      {
+        id: 'actions',
+        header: () => null,
+        cell: ({ row }) => {
+          const isExpanded = expandedRowId === row.original.id;
+          return (
+            <div className="flex items-center justify-end gap-1">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigator.clipboard.writeText(row.original.email).then(() => {
+                    toast.success('Email copied', { description: row.original.email });
+                  });
+                }}
+                aria-label={`Copy email for ${row.original.name}`}
+                className="rounded p-1.5 text-[var(--nt-text-secondary)] hover:bg-[var(--nt-surface-elevated)] hover:text-[var(--nt-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--nt-accent)]"
+              >
+                <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+              <button
+                data-testid="view-lead"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onExpandedRowChange(isExpanded ? null : row.original.id);
+                }}
+                aria-label={isExpanded ? `Collapse ${row.original.name}` : `Expand ${row.original.name}`}
+                aria-expanded={isExpanded}
+                className="rounded p-1.5 text-[var(--nt-text-secondary)] hover:bg-[var(--nt-surface-elevated)] hover:text-[var(--nt-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--nt-accent)]"
+              >
+                {isExpanded
+                  ? <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+                  : <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />}
+              </button>
             </div>
-          </div>
-        );
+          );
+        },
+        size: 80,
+        enableSorting: false,
       },
-      size: 250,
-    },
-    {
-      accessorKey: 'company',
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-          className="h-8 px-2 lg:px-3"
-        >
-          Bedrift
-          <ArrowUpDown className="ml-2 h-4 w-4" />
-        </Button>
-      ),
-      cell: ({ row }) => {
-        const lead = row.original;
-        return (
-          <div className="max-w-[200px]">
-            <div className="font-medium truncate">{lead.company || '—'}</div>
-            {lead.title && (
-              <div className="text-sm text-muted-foreground truncate">
-                {lead.title}
-              </div>
-            )}
-          </div>
-        );
-      },
-      size: 200,
-    },
-    {
-      accessorKey: 'location',
-      header: 'Lokasjon',
-      cell: ({ row }) => (
-        <div className="text-sm">
-          {row.getValue('location') || '—'}
-        </div>
-      ),
-      size: 120,
-    },
-    {
-      accessorKey: 'tags',
-      header: 'Tags',
-      cell: ({ row }) => {
-        const tags = row.getValue('tags') as string[];
-        if (!tags || tags.length === 0) return <span className="text-muted-foreground">—</span>;
+    ],
+    [expandedRowId, onExpandedRowChange]
+  );
 
-        return (
-          <div className="flex flex-wrap gap-1 max-w-[150px]">
-            {tags.slice(0, 2).map((tag) => (
-              <Badge key={tag} variant="secondary" className="text-xs">
-                {tag}
-              </Badge>
-            ))}
-            {tags.length > 2 && (
-              <Badge variant="outline" className="text-xs">
-                +{tags.length - 2}
-              </Badge>
-            )}
-          </div>
-        );
-      },
-      enableSorting: false,
-      size: 150,
-    },
-    {
-      accessorKey: 'score',
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-          className="h-8 px-2 lg:px-3"
-        >
-          Score
-          <ArrowUpDown className="ml-2 h-4 w-4" />
-        </Button>
-      ),
-      cell: ({ row }) => {
-        const score = row.getValue('score') as number;
-        if (!score) return <span className="text-muted-foreground">—</span>;
-
-        return (
-          <div className="flex items-center space-x-2">
-            <div className={`font-medium ${getScoreColor(score)}`}>
-              {score}
-            </div>
-            <div className="flex items-center">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Star
-                  key={i}
-                  className={`h-3 w-3 ${
-                    i < Math.floor(score / 20)
-                      ? 'text-yellow-400 fill-current'
-                      : 'text-gray-300'
-                  }`}
-                />
-              ))}
-            </div>
-          </div>
-        );
-      },
-      size: 120,
-    },
-    {
-      accessorKey: 'sourceIds',
-      header: 'Kilder',
-      cell: ({ row }) => {
-        const sources = row.getValue('sourceIds') as string[];
-        if (!sources || sources.length === 0) return <span className="text-muted-foreground">—</span>;
-
-        return (
-          <div className="text-sm">
-            {sources.length === 1 ? (
-              <Badge variant="outline">{sources[0]}</Badge>
-            ) : (
-              <Badge variant="outline">{sources.length} kilder</Badge>
-            )}
-          </div>
-        );
-      },
-      enableSorting: false,
-      size: 100,
-    },
-    {
-      accessorKey: 'createdAt',
-      header: ({ column }) => (
-        <Button
-          variant="ghost"
-          onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-          className="h-8 px-2 lg:px-3"
-        >
-          Opprettet
-          <ArrowUpDown className="ml-2 h-4 w-4" />
-        </Button>
-      ),
-      cell: ({ row }) => (
-        <div className="text-sm text-muted-foreground">
-          {formatDate(row.getValue('createdAt'), 'short')}
-        </div>
-      ),
-      size: 100,
-    },
-    {
-      id: 'actions',
-      header: 'Handlinger',
-      cell: ({ row }) => {
-        const lead = row.original;
-
-        return (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="h-8 w-8 p-0">
-                <span className="sr-only">Åpne meny</span>
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuLabel>Handlinger</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                onClick={() => onRowSelect?.(lead)}
-              >
-                <Eye className="mr-2 h-4 w-4" />
-                Vis detaljer
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                onClick={() => navigator.clipboard.writeText(lead.email || '')}
-              >
-                <Copy className="mr-2 h-4 w-4" />
-                Kopier e-post
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start"
-                onClick={() => window.open(`mailto:${lead.email}`, '_blank')}
-              >
-                <Mail className="mr-2 h-4 w-4" />
-                Send e-post
-              </Button>
-
-              {lead.company && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start"
-                  onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(lead.company || '')}`, '_blank')}
-                >
-                  <ExternalLink className="mr-2 h-4 w-4" />
-                  Søk på bedrift
-                </Button>
-              )}
-
-              <DropdownMenuSeparator />
-
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start text-destructive"
-                onClick={() => onBulkAction?.('delete', [lead.id])}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Slett
-              </Button>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        );
-      },
-      enableSorting: false,
-      enableHiding: false,
-      size: 80,
-    },
-  ], [onRowSelect, onBulkAction]);
-
-  // Create table instance
   const table = useReactTable({
     data,
     columns,
+    state: { sorting, rowSelection, globalFilter },
+    onSortingChange: (updater: Updater<SortingState>) => {
+      onSortingChange(typeof updater === 'function' ? updater(sorting) : updater);
+    },
+    onRowSelectionChange: (updater: Updater<RowSelectionState>) => {
+      onRowSelectionChange(typeof updater === 'function' ? updater(rowSelection) : updater);
+    },
+    onGlobalFilterChange: () => {},
     getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    onSortingChange: setSorting,
-    onColumnFiltersChange: setColumnFilters,
-    onColumnVisibilityChange: setColumnVisibility,
-    onRowSelectionChange: setRowSelection,
-    state: {
-      sorting,
-      columnFilters,
-      columnVisibility,
-      rowSelection,
+    getFilteredRowModel: getFilteredRowModel(),
+    globalFilterFn: (row, _id, filterValue: string) => {
+      const q = filterValue.toLowerCase();
+      const { name, email, company, domain } = row.original;
+      return (
+        name.toLowerCase().includes(q) ||
+        email.toLowerCase().includes(q) ||
+        company.toLowerCase().includes(q) ||
+        domain.toLowerCase().includes(q)
+      );
     },
     enableRowSelection: true,
-    enableMultiRowSelection: true,
   });
 
-  // Virtual scrolling setup
-  const { rows } = table.getRowModel();
-  const parentRef = React.useRef<HTMLDivElement>(null);
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <SkeletonBlock key={i} className="h-12 rounded" />
+        ))}
+      </div>
+    );
+  }
 
-  const virtualizer = useVirtualizer({
-    count: rows.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 60,
-    overscan: 10,
-  });
+  const rows = table.getRowModel().rows;
 
-  // Handle sorting change
-  const handleSortingChange = useCallback((newSorting: SortingState) => {
-    setSorting(newSorting);
-    if (onSortChange && newSorting.length > 0) {
-      const sort = newSorting[0];
-      onSortChange({
-        field: sort.id,
-        direction: sort.desc ? 'desc' : 'asc'
-      });
-    }
-  }, [onSortChange]);
-
-  // Get selected lead IDs
-  const selectedLeadIds = useMemo(() => {
-    return table.getSelectedRowModel().rows.map(row => row.original.id);
-  }, [rowSelection]);
-
-  // Bulk actions
-  const handleBulkAction = (action: string) => {
-    if (selectedLeadIds.length > 0) {
-      onBulkAction?.(action, selectedLeadIds);
-      setRowSelection({});
-    }
-  };
-
-  if (loading && data.length === 0) {
-    return <LeadTableSkeleton />;
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        icon={Users}
+        title="No leads found"
+        description="Try adjusting your search or filters, or start a run to discover new leads."
+        className="rounded-lg border border-[var(--nt-border)] bg-[var(--nt-surface)]"
+      />
+    );
   }
 
   return (
-    <div className={`space-y-4 ${className}`}>
-      {/* Table controls */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          {selectedLeadIds.length > 0 && (
-            <>
-              <Badge variant="secondary">
-                {selectedLeadIds.length} valgt
-              </Badge>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleBulkAction('addTags')}
-              >
-                <Tag className="mr-2 h-4 w-4" />
-                Legg til tags
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onExport?.(selectedLeadIds)}
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Eksporter valgte
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleBulkAction('delete')}
-                className="text-destructive"
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Slett valgte
-              </Button>
-            </>
-          )}
-        </div>
-
-        <div className="flex items-center space-x-2">
-          <div className="text-sm text-muted-foreground">
-            {formatNumber(totalCount)} leads totalt
-          </div>
-
-          {/* Column visibility */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Settings className="mr-2 h-4 w-4" />
-                Kolonner
-                <ChevronDown className="ml-2 h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuLabel>Vis/skjul kolonner</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {table
-                .getAllColumns()
-                .filter(column => column.getCanHide())
-                .map(column => (
-                  <DropdownMenuCheckboxItem
-                    key={column.id}
-                    className="capitalize"
-                    checked={column.getIsVisible()}
-                    onCheckedChange={value => column.toggleVisibility(!!value)}
+    <div
+      data-testid="leads-table"
+      className="overflow-hidden rounded-lg border border-[var(--nt-border)]"
+      role="region"
+      aria-label="Leads table"
+    >
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[640px] border-collapse">
+          <thead>
+            {table.getHeaderGroups().map((hg) => (
+              <tr key={hg.id} className="border-b border-[var(--nt-border)] bg-[var(--nt-surface)]">
+                {hg.headers.map((header) => (
+                  <th
+                    key={header.id}
+                    className="px-4 py-3 text-left font-medium text-[var(--nt-text-secondary)]"
+                    style={{ width: header.getSize() }}
+                    aria-sort={
+                      header.column.getIsSorted() === 'asc' ? 'ascending'
+                      : header.column.getIsSorted() === 'desc' ? 'descending'
+                      : undefined
+                    }
                   >
-                    {column.id}
-                  </DropdownMenuCheckboxItem>
+                    {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                  </th>
                 ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onExport?.()}
-          >
-            <Download className="mr-2 h-4 w-4" />
-            Eksporter alle
-          </Button>
-        </div>
-      </div>
-
-      {/* Virtual table */}
-      <div className="border rounded-md overflow-x-auto">
-        <div
-          ref={parentRef}
-          className="h-[600px] overflow-auto"
-        >
-          <div style={{ height: `${virtualizer.getTotalSize()}px` }}>
-            <Table>
-              <TableHeader className="sticky top-0 bg-background z-10">
-                {table.getHeaderGroups().map(headerGroup => (
-                  <TableRow key={headerGroup.id}>
-                    {headerGroup.headers.map(header => (
-                      <TableHead
-                        key={header.id}
-                        style={{ width: header.getSize() }}
-                        className="border-b"
-                      >
-                        {header.isPlaceholder
-                          ? null
-                          : flexRender(
-                              header.column.columnDef.header,
-                              header.getContext()
-                            )}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                ))}
-              </TableHeader>
-              <TableBody>
-                {virtualizer.getVirtualItems().map(virtualRow => {
-                  const row = rows[virtualRow.index] as Row<Lead>;
-                  return (
-                    <TableRow
-                      key={row.id}
-                      data-state={row.getIsSelected() && "selected"}
-                      style={{
-                        transform: `translateY(${virtualRow.start}px)`,
-                        position: 'absolute',
-                        width: '100%',
-                        height: `${virtualRow.size}px`,
-                      }}
-                      className="hover:bg-muted/50 cursor-pointer"
-                      onClick={() => onRowSelect?.(row.original)}
-                    >
-                      {row.getVisibleCells().map(cell => (
-                        <TableCell
-                          key={cell.id}
-                          style={{ width: cell.column.getSize() }}
-                          className="py-3"
-                        >
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        </div>
-      </div>
-
-      {/* Loading overlay */}
-      {loading && (
-        <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
-          <div className="flex items-center space-x-2">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
-            <span className="text-sm text-muted-foreground">Laster leads...</span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function LeadTableSkeleton() {
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="h-8 w-32 skeleton"></div>
-        <div className="flex items-center space-x-2">
-          <div className="h-8 w-24 skeleton"></div>
-          <div className="h-8 w-24 skeleton"></div>
-        </div>
-      </div>
-
-      <div className="border rounded-md">
-        <div className="p-4">
-          {/* Header skeleton */}
-          <div className="grid grid-cols-8 gap-4 mb-4 pb-2 border-b">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="h-4 skeleton"></div>
+              </tr>
             ))}
-          </div>
-
-          {/* Rows skeleton */}
-          {Array.from({ length: 10 }).map((_, i) => (
-            <div key={i} className="grid grid-cols-8 gap-4 py-3 border-b border-border/50">
-              {Array.from({ length: 8 }).map((_, j) => (
-                <div key={j} className="h-4 skeleton"></div>
-              ))}
-            </div>
-          ))}
-        </div>
+          </thead>
+          <tbody className="bg-[var(--nt-surface)]">
+            {rows.map((row) => {
+              const isExpanded = expandedRowId === row.original.id;
+              return (
+                <React.Fragment key={row.id}>
+                  <tr
+                    className={cn(
+                      'cursor-pointer border-b border-[var(--nt-border)] transition-colors last:border-b-0',
+                      row.getIsSelected() ? 'bg-[var(--nt-accent)]/5' : 'hover:bg-[var(--nt-surface-elevated)]',
+                      isExpanded && 'bg-[var(--nt-surface-elevated)]'
+                    )}
+                    onClick={() => onExpandedRowChange(isExpanded ? null : row.original.id)}
+                    aria-selected={row.getIsSelected()}
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <td key={cell.id} className="px-4 py-3">
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </td>
+                    ))}
+                  </tr>
+                  {isExpanded && (
+                    <tr key={`${row.id}-details`} className="border-b border-[var(--nt-border)] last:border-b-0">
+                      <td colSpan={columns.length} className="p-0">
+                        <LeadRowDetails lead={row.original} onMarkContacted={onMarkContacted} />
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex items-center justify-between border-t border-[var(--nt-border)] bg-[var(--nt-surface)] px-4 py-2.5">
+        <span className="text-xs text-[var(--nt-text-secondary)]">
+          {Object.keys(rowSelection).length > 0 && <>{Object.keys(rowSelection).length} selected · </>}
+          {rows.length} rows
+        </span>
       </div>
     </div>
   );
-}
+});

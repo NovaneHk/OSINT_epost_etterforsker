@@ -1,215 +1,199 @@
-'use client'
+﻿'use client';
 
-import React from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
-import { AlertCircle, CheckCircle, Clock, TrendingUp, Users, Target } from 'lucide-react'
-import { api } from '@/lib/api'
-import { formatNumber } from '@/lib/utils'
+import { useState, useEffect, useMemo } from 'react';
+import dynamic from 'next/dynamic';
+import { Users, Search, TrendingUp, Download } from 'lucide-react';
+import { KpiCard } from '@/components/dashboard/kpi-card';
+import { ActiveRunsTable } from '@/components/dashboard/active-runs-table';
+import { SourceHealthGrid } from '@/components/dashboard/source-health-grid';
+import { RecentLeads } from '@/components/dashboard/recent-leads';
+import { ActivityFeed } from '@/components/dashboard/activity-feed';
+import { QuickActions } from '@/components/dashboard/quick-actions';
+import { SkeletonBlock } from '@/components/shared/skeleton-block';
+import { formatCompact, formatPercentage } from '@/lib/format';
+import { getDashboardMetrics, getDashboardTrends, getDashboardActivity } from '@/lib/data/dashboard';
+import { getActiveRuns } from '@/lib/data/runs';
+import { getSourceHealth } from '@/lib/data/sources';
+import { getLeads } from '@/lib/data/leads';
+import type { DashboardMetrics, TrendDataPoint, ActivityEvent, Run, SourceHealth, Lead } from '@/lib/types';
+
+// Lazy-load the heavy Recharts chart — keeps initial JS parse lean
+const DashboardTrendChart = dynamic(
+  () =>
+    import('@/components/dashboard/dashboard-trend-chart').then((m) => ({
+      default: m.DashboardTrendChart,
+    })),
+  { ssr: false, loading: () => <SkeletonBlock className="h-72 rounded-xl" /> }
+);
+
+interface DashboardState {
+  metrics: DashboardMetrics | null;
+  trends: TrendDataPoint[];
+  activity: ActivityEvent[];
+  activeRuns: Run[];
+  sourceHealth: SourceHealth[];
+  recentLeads: Lead[];
+  isLoading: boolean;
+  error: string | null;
+}
+
+const INITIAL_STATE: DashboardState = {
+  metrics: null,
+  trends: [],
+  activity: [],
+  activeRuns: [],
+  sourceHealth: [],
+  recentLeads: [],
+  isLoading: true,
+  error: null,
+};
 
 export default function DashboardPage() {
-  const { data: kpis, isLoading: kpisLoading, error: kpisError } = useQuery({
-    queryKey: ['kpis'],
-    queryFn: api.getKPIs,
-    refetchInterval: 30000 // Refresh every 30 seconds
-  })
+  const [state, setState] = useState<DashboardState>(INITIAL_STATE);
 
-  const { data: leads, isLoading: leadsLoading } = useQuery({
-    queryKey: ['leads', { limit: 5 }],
-    queryFn: () => api.getLeads({ limit: 5 }),
-  })
+  useEffect(() => {
+    let cancelled = false;
 
-  if (kpisLoading) {
+    async function loadAll() {
+      try {
+        const [metricsRes, trendsRes, activityRes, runsRes, healthRes, leadsRes] =
+          await Promise.all([
+            getDashboardMetrics(),
+            getDashboardTrends('30d'),
+            getDashboardActivity(),
+            getActiveRuns(),
+            getSourceHealth(),
+            getLeads({ pageSize: 8 }),
+          ]);
+
+        if (cancelled) return;
+
+        setState({
+          metrics: metricsRes.ok ? metricsRes.data : null,
+          trends: trendsRes.ok ? trendsRes.data : [],
+          activity: activityRes.ok ? activityRes.data : [],
+          activeRuns: runsRes.ok ? runsRes.data : [],
+          sourceHealth: healthRes.ok ? healthRes.data : [],
+          recentLeads: leadsRes.ok ? leadsRes.data.items : [],
+          isLoading: false,
+          error: null,
+        });
+      } catch (err) {
+        if (cancelled) return;
+        setState((prev) => ({
+          ...prev,
+          isLoading: false,
+          error: err instanceof Error ? err.message : 'Failed to load dashboard',
+        }));
+      }
+    }
+
+    loadAll();
+    return () => { cancelled = true; };
+  }, []);
+
+  const leadSparkline = useMemo(
+    () => state.trends.slice(-7).map((d) => d.leads),
+    [state.trends]
+  );
+  const searchSparkline = useMemo(
+    () => state.trends.slice(-7).map((d) => d.searches),
+    [state.trends]
+  );
+
+  if (state.error) {
     return (
-      <div className="p-6">
-        <h1 className="text-3xl font-bold tracking-tight mb-6">Dashboard</h1>
-        <div className="animate-pulse">
-          <div className="h-8 bg-gray-200 rounded w-1/4 mb-6"></div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[...Array(6)].map((_, i) => (
-              <div key={i} className="h-32 bg-gray-200 rounded"></div>
-            ))}
-          </div>
-        </div>
+      <div className="flex h-64 flex-col items-center justify-center gap-2 text-center">
+        <p className="text-sm font-medium text-[var(--nt-danger)]">Failed to load dashboard</p>
+        <p className="text-xs text-[var(--nt-text-secondary)]">{state.error}</p>
       </div>
-    )
-  }
-
-  if (kpisError) {
-    return (
-      <div className="p-6">
-        <h1 className="text-3xl font-bold tracking-tight mb-6">Dashboard</h1>
-        <div className="flex items-center gap-2 text-red-600 mb-4">
-          <AlertCircle className="h-5 w-5" />
-          <span>Feil ved lasting av dashboard data</span>
-        </div>
-        <p className="text-gray-600">Prøv å laste siden på nytt</p>
-      </div>
-    )
+    );
   }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground">Oversikt over OSINT lead generering aktivitet</p>
+      {/* ── KPI row ──────────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {state.isLoading || !state.metrics ? (
+          Array.from({ length: 4 }).map((_, i) => (
+            <SkeletonBlock key={i} className="h-32 rounded-xl" />
+          ))
+        ) : (
+          <>
+            <KpiCard
+              label="Leads 7d"
+              value={formatCompact(state.metrics.leads7d)}
+              delta={state.metrics.leads7dChange}
+              icon={Users}
+              sparklineData={leadSparkline}
+              accentColor="var(--nt-accent)"
+            />
+            <KpiCard
+              label="Searches 7d"
+              value={formatCompact(state.metrics.searches7d)}
+              delta={state.metrics.searches7dChange}
+              icon={Search}
+              sparklineData={searchSparkline}
+              accentColor="var(--nt-ai)"
+            />
+            <KpiCard
+              label="Conversion Rate"
+              value={formatPercentage(state.metrics.conversionRate)}
+              delta={state.metrics.conversionRateChange}
+              icon={TrendingUp}
+              accentColor="var(--nt-success)"
+            />
+            <KpiCard
+              label="Exports 7d"
+              value={String(state.metrics.exports7d)}
+              delta={state.metrics.exports7dChange}
+              icon={Download}
+              accentColor="var(--nt-warning)"
+            />
+          </>
+        )}
       </div>
 
-      <Separator />
+      {/* ── Main trend chart ──────────────────────────────────────────────────── */}
+      {state.isLoading ? (
+        <SkeletonBlock className="h-72 rounded-xl" />
+      ) : (
+        <DashboardTrendChart data={state.trends} />
+      )}
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Leads (7 dager)</CardTitle>
-            <Users className="h-4 w-4 text-blue-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatNumber(kpis?.leads7d || 0)}</div>
-            <p className="text-xs text-muted-foreground">Nye leads denne uken</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Søk (7 dager)</CardTitle>
-            <Target className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatNumber(kpis?.hits7d || 0)}</div>
-            <p className="text-xs text-muted-foreground">Søketreff denne uken</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Konverteringsrate</CardTitle>
-            <TrendingUp className="h-4 w-4 text-purple-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{(kpis?.conversion_rate || 0).toFixed(1)}%</div>
-            <p className="text-xs text-muted-foreground">Av totale søk</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Eksporter (7 dager)</CardTitle>
-            <CheckCircle className="h-4 w-4 text-orange-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatNumber(kpis?.exports7d || 0)}</div>
-            <p className="text-xs text-muted-foreground">Fullførte eksporter</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Totale kilder</CardTitle>
-            <Clock className="h-4 w-4 text-indigo-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatNumber(kpis?.total_sources || 0)}</div>
-            <p className="text-xs text-muted-foreground">Konfigurerte kilder</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Aktive kilder</CardTitle>
-            <CheckCircle className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatNumber(kpis?.active_sources || 0)}</div>
-            <p className="text-xs text-muted-foreground">Kilder i bruk</p>
-          </CardContent>
-        </Card>
+      {/* ── Active runs + source health ───────────────────────────────────────── */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {state.isLoading ? (
+          <>
+            <SkeletonBlock className="h-48 rounded-xl" />
+            <SkeletonBlock className="h-48 rounded-xl" />
+          </>
+        ) : (
+          <>
+            <ActiveRunsTable runs={state.activeRuns} />
+            <SourceHealthGrid sources={state.sourceHealth} />
+          </>
+        )}
       </div>
 
-      {/* Recent Leads */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Siste leads</CardTitle>
-          <CardDescription>De 5 nyeste genererte leads</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {leadsLoading ? (
-            <div className="space-y-3">
-              {[...Array(3)].map((_, i) => (
-                <div key={i} className="animate-pulse flex items-center space-x-4">
-                  <div className="rounded-full bg-gray-200 h-10 w-10"></div>
-                  <div className="flex-1 space-y-2">
-                    <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-                    <div className="h-3 bg-gray-200 rounded w-1/2"></div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : leads?.data && leads.data.length > 0 ? (
-            <div className="space-y-4">
-              {leads.data.slice(0, 5).map((lead) => (
-                <div key={lead.id} className="flex items-center justify-between p-3 border rounded-lg">
-                  <div className="flex items-center space-x-3">
-                    <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                      <Users className="h-5 w-5 text-blue-600" />
-                    </div>
-                    <div>
-                      <p className="font-medium">{lead.name}</p>
-                      <p className="text-sm text-gray-600">{lead.email}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Badge variant={lead.verification_status === 'verified' ? 'default' : 'secondary'}>
-                      {lead.verification_status}
-                    </Badge>
-                    <span className="text-sm text-gray-500">
-                      Score: {lead.score || 0}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
+      {/* ── Recent leads + quick actions ──────────────────────────────────────── */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="xl:col-span-2">
+          {state.isLoading ? (
+            <SkeletonBlock className="h-64 rounded-xl" />
           ) : (
-            <div className="text-center py-6 text-gray-500">
-              <Users className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-              <p>Ingen leads funnet</p>
-              <p className="text-sm">Start din første søkekampanje for å generere leads</p>
-            </div>
+            <RecentLeads leads={state.recentLeads} />
           )}
-        </CardContent>
-      </Card>
+        </div>
+        <QuickActions />
+      </div>
 
-      {/* System Status */}
-      <Card>
-        <CardHeader>
-          <CardTitle>System status</CardTitle>
-          <CardDescription>Aktuelle systemtilstand</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between py-2">
-            <span className="text-sm">Backend API</span>
-            <Badge variant="default" className="bg-green-100 text-green-800">
-              <CheckCircle className="h-3 w-3 mr-1" />
-              Aktiv
-            </Badge>
-          </div>
-          <div className="flex items-center justify-between py-2">
-            <span className="text-sm">Database</span>
-            <Badge variant="default" className="bg-green-100 text-green-800">
-              <CheckCircle className="h-3 w-3 mr-1" />
-              Tilkoblet
-            </Badge>
-          </div>
-          <div className="flex items-center justify-between py-2">
-            <span className="text-sm">Aktive kilder</span>
-            <Badge variant="default" className="bg-blue-100 text-blue-800">
-              {kpis?.active_sources || 0} av {kpis?.total_sources || 0}
-            </Badge>
-          </div>
-        </CardContent>
-      </Card>
+      {/* ── Activity feed ─────────────────────────────────────────────────────── */}
+      {state.isLoading ? (
+        <SkeletonBlock className="h-48 rounded-xl" />
+      ) : (
+        <ActivityFeed events={state.activity} limit={10} />
+      )}
     </div>
-  )
+  );
 }
